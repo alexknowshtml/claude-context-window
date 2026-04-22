@@ -1,76 +1,21 @@
 #!/usr/bin/env bun
 /**
- * Claude Code Context Window Visualizer
+ * Live Context Window Visualizer
+ * Watches active Claude Code session transcripts and serves a real-time
+ * breakdown of token usage by content type.
  *
- * Real-time dashboard for your active Claude Code session.
- * Parses JSONL transcripts, shows token usage by type, cache hit rate,
- * estimated cost, session duration, and a compaction warning.
- *
- * Usage:
- *   bun run server.ts
- *   bun run server.ts --project ~/.claude/projects/my-project
- *   PORT=4000 bun run server.ts
- *   CLAUDE_PROJECT_DIR=~/.claude/projects/my-project bun run server.ts
+ * Port: 2670
+ * Usage: bun run scripts/context-window-server.ts
  */
 
 import { watch } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
-import { join, resolve } from "path";
+import { join } from "path";
 import { homedir } from "os";
 
-const PORT = parseInt(process.env.PORT ?? "3456");
-const MODEL_LIMIT = parseInt(process.env.MODEL_LIMIT ?? "200000");
-
-// ─── Project Directory Resolution ─────────────────────────────────────────────
-// Priority: --project flag > CLAUDE_PROJECT_DIR env > auto-detect
-
-function getProjectDirFromArgs(): string | null {
-  const idx = process.argv.indexOf("--project");
-  if (idx !== -1 && process.argv[idx + 1]) {
-    return process.argv[idx + 1].replace(/^~/, homedir());
-  }
-  return null;
-}
-
-async function autoDetectProjectDir(): Promise<string> {
-  const baseDir = join(homedir(), ".claude", "projects");
-  try {
-    const entries = await readdir(baseDir);
-    const withStats = await Promise.all(
-      entries.map(async (e) => {
-        try {
-          const s = await stat(join(baseDir, e));
-          return { name: e, mtime: s.mtime.getTime(), isDir: s.isDirectory() };
-        } catch {
-          return null;
-        }
-      })
-    );
-    const dirs = withStats
-      .filter((e): e is NonNullable<typeof e> => e !== null && e.isDir)
-      .sort((a, b) => b.mtime - a.mtime);
-
-    if (dirs.length === 0) throw new Error("No project directories found");
-    return join(baseDir, dirs[0].name);
-  } catch {
-    throw new Error(
-      `Could not find Claude Code projects at ${baseDir}. ` +
-        `Pass --project /path/to/project or set CLAUDE_PROJECT_DIR.`
-    );
-  }
-}
-
-async function resolveProjectDir(): Promise<string> {
-  const fromArg = getProjectDirFromArgs();
-  if (fromArg) return resolve(fromArg);
-
-  const fromEnv = process.env.CLAUDE_PROJECT_DIR;
-  if (fromEnv) return resolve(fromEnv.replace(/^~/, homedir()));
-
-  return autoDetectProjectDir();
-}
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+const PORT = 3456;
+const PROJECTS_DIR = join(homedir(), ".claude/projects/-home-alexhillman-andy");
+const MODEL_LIMIT = 200_000;
 
 type BlockType =
   | "system"
@@ -84,6 +29,18 @@ interface ContextBlock {
   type: BlockType;
   label: string;
   tokens: number;
+}
+
+interface StartingContextEntry {
+  label: string;
+  tokens: number;
+  path?: string;
+  warning?: string;
+}
+
+interface StartingContextBreakdown {
+  total: number;
+  entries: StartingContextEntry[];
 }
 
 interface TurnStat {
@@ -117,15 +74,13 @@ interface SessionStats {
   sessionLastActivityAt?: string;
   compactionWarning: boolean;
   updatedAt: string;
+  startingContext: StartingContextBreakdown;
 }
 
-// ─── Token Estimation ─────────────────────────────────────────────────────────
-
+// ~3.5 chars per token approximation
 function estTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 3.5));
 }
-
-// ─── Content Classification ───────────────────────────────────────────────────
 
 function classifyContent(text: string, toolName?: string): BlockType {
   if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
@@ -138,18 +93,47 @@ function classifyContent(text: string, toolName?: string): BlockType {
     if (
       text.includes("/memory/") ||
       text.includes("MEMORY.md") ||
-      text.match(/memory\/[a-z_-]+\.md/)
+      text.includes("memory/user_") ||
+      text.includes("memory/feedback_") ||
+      text.includes("memory/reference_")
     )
       return "memory";
   }
   return "tool_result";
 }
 
-// ─── Session Discovery ────────────────────────────────────────────────────────
+async function readStartingContextFiles(): Promise<StartingContextEntry[]> {
+  const MEMORY_DIR = join(PROJECTS_DIR, "memory");
+  const candidates = [
+    { label: "CLAUDE.md (global)", path: join(homedir(), ".claude/CLAUDE.md") },
+    { label: "CLAUDE.md (project)", path: join(homedir(), "andy/CLAUDE.md") },
+    { label: "MEMORY.md (index)", path: join(MEMORY_DIR, "MEMORY.md") },
+  ];
 
-let PROJECTS_DIR = "";
+  const results: StartingContextEntry[] = [];
+  for (const f of candidates) {
+    try {
+      const content = await readFile(f.path, "utf-8");
+      const tokens = estTokens(content);
+      let warning: string | undefined;
+      if (f.label.includes("MEMORY.md")) {
+        const lines = content.split("\n").length;
+        if (lines > 200) warning = `${lines} lines (limit: 200) — tail entries may be truncated`;
+      }
+      if (f.label.includes("CLAUDE.md") && tokens > 3000) {
+        warning = `${tokens.toLocaleString()} tokens — consider moving sections to on-demand includes`;
+      }
+      results.push({ label: f.label, path: f.path, tokens, warning });
+    } catch {
+      // file unreadable — skip
+    }
+  }
+  return results;
+}
 
-async function findActiveSessions(): Promise<Array<{ id: string; mtime: number }>> {
+async function findActiveSessions(): Promise<
+  Array<{ id: string; mtime: number }>
+> {
   try {
     const files = await readdir(PROJECTS_DIR);
     const jsonls = files.filter((f) => f.endsWith(".jsonl"));
@@ -165,8 +149,6 @@ async function findActiveSessions(): Promise<Array<{ id: string; mtime: number }
   }
 }
 
-// ─── Session Parser ───────────────────────────────────────────────────────────
-
 async function parseSession(sessionId: string): Promise<SessionStats> {
   const filePath = join(PROJECTS_DIR, `${sessionId}.jsonl`);
   let raw: string;
@@ -176,17 +158,28 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     return emptyStats(sessionId);
   }
 
-  const lines = raw.trim().split("\n").filter((l) => l.trim());
+  const startingContextFiles = await readStartingContextFiles();
+
+  const lines = raw
+    .trim()
+    .split("\n")
+    .filter((l) => l.trim());
   const blocks: ContextBlock[] = [];
   const skills: string[] = [];
   const turns: TurnStat[] = [];
-  let latestUsage = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+  let latestUsage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheCreate: 0,
+  };
   let model = "claude-sonnet-4-6";
   let sessionStartedAt: string | undefined;
   let sessionLastActivityAt: string | undefined;
   let sessionHasThinking = false;
 
-  const toolUseNames = new Map<string, string>();
+  // Track tool_use name by id so we can classify tool_result blocks
+  const toolUseNames: Map<string, string> = new Map();
   let firstAssistantCacheCreate = 0;
   let seenFirstAssistant = false;
 
@@ -210,28 +203,35 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
       if (!msg) continue;
       const content = msg.content;
 
+      // System-reminder blocks (injected into first user message)
       if (typeof content === "string") {
-        // Extract system-reminder injections
         const sysBlocks =
           content.match(/<system-reminder>[\s\S]*?<\/system-reminder>/g) ?? [];
         for (const sb of sysBlocks) {
           blocks.push({ type: "system", label: "System Context", tokens: estTokens(sb) });
         }
-        // Extract real user message (works for both plain and injected formats)
-        const injectedMsg = content.match(/\*\*Message:\*\* (.+)/)?.[1];
-        const userText = injectedMsg ?? (!content.includes("[CLAUDE-INTERNAL") ? content : null);
-        if (userText) {
+        // Real user message
+        const userMsg = content.match(/\*\*Message:\*\* (.+)/)?.[1];
+        if (userMsg) {
           blocks.push({
             type: "user",
-            label: `User: "${userText.slice(0, 60)}"`,
-            tokens: estTokens(userText),
+            label: `User: "${userMsg.slice(0, 60)}"`,
+            tokens: estTokens(userMsg),
+          });
+        } else if (!content.includes("[ANDY-INTERNAL-TASK]")) {
+          blocks.push({
+            type: "user",
+            label: `User: "${content.slice(0, 60)}"`,
+            tokens: estTokens(content),
           });
         }
       }
 
       if (Array.isArray(content)) {
         for (const block of content as Record<string, unknown>[]) {
-          if ((block.type as string) === "tool_result") {
+          const bt = block.type as string;
+
+          if (bt === "tool_result") {
             const toolUseId = block.tool_use_id as string | undefined;
             const toolName = toolUseId ? toolUseNames.get(toolUseId) : undefined;
             const resultContent = block.content;
@@ -245,8 +245,8 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
                 : "";
 
             const bType = classifyContent(resultText, toolName);
-            let label = toolName ? `${toolName} result` : "Tool Result";
 
+            let label = "Tool Result";
             if (bType === "skill_prompt") {
               const m = resultText.match(/skills\/([a-z-]+)\//);
               const skillName = m?.[1] ?? "skill";
@@ -255,6 +255,8 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
             } else if (bType === "memory") {
               const m = resultText.match(/memory\/([^.]+)\.md/);
               label = m ? `memory/${m[1]}` : "Memory file";
+            } else if (toolName) {
+              label = `${toolName} result`;
             }
 
             blocks.push({ type: bType, label, tokens: estTokens(resultText) });
@@ -266,6 +268,7 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     if (type === "assistant") {
       const msg = obj.message as Record<string, unknown> | undefined;
       if (!msg) continue;
+
       if (msg.model) model = msg.model as string;
 
       const usage = msg.usage as Record<string, number> | undefined;
@@ -282,8 +285,8 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
         }
       }
 
-      let turnHasThinking = false;
       const msgContent = msg.content as Record<string, unknown>[] | undefined;
+      let turnHasThinking = false;
 
       if (Array.isArray(msgContent)) {
         for (const block of msgContent) {
@@ -293,33 +296,37 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
             sessionHasThinking = true;
           }
           if (bt === "text" && block.text) {
+            const text = block.text as string;
             blocks.push({
               type: "assistant",
-              label: `Assistant: "${(block.text as string).slice(0, 60).replace(/\n/g, " ")}"`,
-              tokens: estTokens(block.text as string),
+              label: `Assistant: "${text.slice(0, 60).replace(/\n/g, " ")}"`,
+              tokens: estTokens(text),
             });
           }
           if (bt === "tool_use") {
             const toolId = block.id as string;
             const toolName = block.name as string;
             if (toolId && toolName) toolUseNames.set(toolId, toolName);
+
             const inputStr = JSON.stringify(block.input ?? {});
             blocks.push({
               type: "tool_result",
-              label: `${toolName}(${Object.keys((block.input as Record<string, unknown>) ?? {}).slice(0, 2).join(", ")})`,
+              label: `${toolName}(${Object.keys(
+                (block.input as Record<string, unknown>) ?? {}
+              )
+                .slice(0, 2)
+                .join(", ")})`,
               tokens: estTokens(inputStr),
             });
           }
         }
       }
 
+      // Record this turn's stats
       if (usage) {
         turns.push({
           turn: turns.length + 1,
-          inputTokens:
-            (usage.input_tokens ?? 0) +
-            (usage.cache_read_input_tokens ?? 0) +
-            (usage.cache_creation_input_tokens ?? 0),
+          inputTokens: (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0),
           outputTokens: usage.output_tokens ?? 0,
           cacheRead: usage.cache_read_input_tokens ?? 0,
           cacheCreate: usage.cache_creation_input_tokens ?? 0,
@@ -330,27 +337,59 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     }
   }
 
-  // Infer system prompt size from first-turn cache creation tokens
+  // Infer system layer from first-call cache creation tokens.
+  // The first cache_creation batch = base system prompt (CLAUDE.md, tool schemas,
+  // skill catalog, memory) + first user message. Subtract parsed user/tool content
+  // to isolate the system prompt size, then prepend a synthetic block.
+  let startingContext: StartingContextBreakdown = { total: firstAssistantCacheCreate, entries: [] };
   if (firstAssistantCacheCreate > 0) {
-    const parsedEarly = blocks
+    const parsedBeforeFirstAssistant = blocks
       .filter((b) => b.type === "user" || b.type === "system")
-      .reduce((s, b) => s + b.tokens, 0);
-    const inferredSystem = Math.max(0, firstAssistantCacheCreate - parsedEarly);
+      .reduce((sum, b) => sum + b.tokens, 0);
+    const inferredSystem = Math.max(0, firstAssistantCacheCreate - parsedBeforeFirstAssistant);
     if (inferredSystem > 500) {
       blocks.unshift({
         type: "system",
-        label: "Base system prompt (CLAUDE.md + tool schemas + context)",
+        label: "Base system prompt (CLAUDE.md + tool schemas + skill catalog)",
         tokens: inferredSystem,
       });
     }
+
+    // Build starting context breakdown
+    const measuredTotal = startingContextFiles.reduce((s, f) => s + f.tokens, 0);
+    const parsedSystemReminders = blocks
+      .filter((b) => b.type === "system" && b.label === "System Context")
+      .reduce((s, b) => s + b.tokens, 0);
+    const toolSchemaTokens = Math.max(
+      0,
+      firstAssistantCacheCreate - measuredTotal - parsedSystemReminders - parsedBeforeFirstAssistant
+    );
+    startingContext = {
+      total: firstAssistantCacheCreate,
+      entries: [
+        { label: "Tool schemas + skill catalog", tokens: toolSchemaTokens },
+        ...startingContextFiles,
+        ...(parsedSystemReminders > 0
+          ? [{ label: "Session context (hooks, env, beads)", tokens: parsedSystemReminders }]
+          : []),
+      ].filter((e) => e.tokens > 0),
+    };
   }
 
+  // Compute token totals by type
   const byType: Record<BlockType, number> = {
-    system: 0, skill_prompt: 0, memory: 0, user: 0, assistant: 0, tool_result: 0,
+    system: 0,
+    skill_prompt: 0,
+    memory: 0,
+    user: 0,
+    assistant: 0,
+    tool_result: 0,
   };
   for (const b of blocks) byType[b.type] += b.tokens;
 
   const totalEstimated = Object.values(byType).reduce((a, b) => a + b, 0);
+
+  // Use actual API usage if available, otherwise fall back to estimate
   const tokensUsed =
     latestUsage.input + latestUsage.cacheRead + latestUsage.cacheCreate > 0
       ? latestUsage.input + latestUsage.cacheRead + latestUsage.cacheCreate
@@ -359,18 +398,14 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
   const tokensRemaining = Math.max(0, MODEL_LIMIT - tokensUsed);
   const capacityPct = Math.min(100, (tokensUsed / MODEL_LIMIT) * 100);
 
+  // Cache hit rate
   const totalCacheTokens = latestUsage.cacheRead + latestUsage.cacheCreate;
   const cacheHitPct = totalCacheTokens > 0
     ? Math.round((latestUsage.cacheRead / totalCacheTokens) * 100)
     : 0;
 
-  // Pricing: claude-sonnet-4-6 (override with PRICE_* env vars for other models)
-  const PRICE = {
-    input: parseFloat(process.env.PRICE_INPUT ?? "3.0"),
-    cacheWrite: parseFloat(process.env.PRICE_CACHE_WRITE ?? "3.75"),
-    cacheRead: parseFloat(process.env.PRICE_CACHE_READ ?? "0.30"),
-    output: parseFloat(process.env.PRICE_OUTPUT ?? "15.0"),
-  };
+  // Cost estimate (claude-sonnet-4-6 pricing per 1M tokens)
+  const PRICE = { input: 3.0, cacheWrite: 3.75, cacheRead: 0.30, output: 15.0 };
   const estimatedCostUsd =
     (latestUsage.input / 1e6) * PRICE.input +
     (latestUsage.cacheCreate / 1e6) * PRICE.cacheWrite +
@@ -398,6 +433,7 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     sessionLastActivityAt,
     compactionWarning: tokensUsed >= 150_000,
     updatedAt: new Date().toISOString(),
+    startingContext,
   };
 }
 
@@ -411,20 +447,21 @@ function emptyStats(sessionId: string): SessionStats {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheCreateTokens: 0,
-    cacheHitPct: 0,
-    estimatedCostUsd: 0,
     contentBlocks: 0,
     skillsLoaded: [],
     blocks: [],
     byType: { system: 0, skill_prompt: 0, memory: 0, user: 0, assistant: 0, tool_result: 0 },
     turns: [],
     hasThinking: false,
+    cacheHitPct: 0,
+    estimatedCostUsd: 0,
     compactionWarning: false,
     updatedAt: new Date().toISOString(),
+    startingContext: { total: 0, entries: [] },
   };
 }
 
-// ─── HTML Frontend ────────────────────────────────────────────────────────────
+// ─── HTML Frontend ──────────────────────────────────────────────────────────
 
 const HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -457,6 +494,7 @@ const HTML = `<!DOCTYPE html>
   html.dark #dark-toggle:hover { color: #e4e4e7 !important; }
 </style>
 <script>
+  // Apply saved dark mode before render to avoid flash
   if (localStorage.getItem('cw-dark') === '1') {
     document.documentElement.classList.add('dark');
   }
@@ -490,7 +528,7 @@ const HTML = `<!DOCTYPE html>
       <div class="flex items-baseline gap-1.5">
         <span class="text-3xl font-bold tracking-tight tabular-nums" id="stat-used">—</span>
         <span class="text-zinc-300 text-lg">/</span>
-        <span class="text-lg text-zinc-400 cw-muted font-medium tabular-nums" id="stat-limit">200,000</span>
+        <span class="text-lg text-zinc-400 cw-muted font-medium tabular-nums">200,000</span>
         <span class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest ml-0.5">tok</span>
       </div>
       <p class="text-[11px] text-zinc-400 cw-muted mt-0.5"><span id="stat-remaining">—</span> remaining</p>
@@ -505,7 +543,7 @@ const HTML = `<!DOCTYPE html>
 
 <!-- Compaction banner -->
 <div id="compaction-banner" style="display:none" class="bg-orange-50 border-b border-orange-200 px-4 py-2 text-xs font-semibold text-orange-700 flex items-center gap-2">
-  ⚠️ Approaching context limit — consider running <code class="bg-orange-100 rounded px-1.5 py-0.5 font-mono">/compact</code> to save state
+  ⚠️ Approaching context limit — consider running <code class="bg-orange-100 rounded px-1.5 py-0.5 font-mono">/pause</code> to save state
 </div>
 
 <!-- Stats strip -->
@@ -529,6 +567,10 @@ const HTML = `<!DOCTYPE html>
   <div class="py-2.5 pr-5 mr-5 border-r cw-border-r border-zinc-100 shrink-0">
     <div class="text-sm font-semibold tabular-nums" id="meta-last">—</div>
     <div class="text-[10px] text-zinc-400 cw-muted uppercase tracking-wider font-medium mt-0.5">Activity</div>
+  </div>
+  <div class="py-2.5 pr-5 mr-5 border-r cw-border-r border-zinc-100 shrink-0 hidden" id="stat-skills-wrap">
+    <div class="text-sm font-semibold tabular-nums" id="stat-skills">—</div>
+    <div class="text-[10px] text-zinc-400 cw-muted uppercase tracking-wider font-medium mt-0.5">Skills</div>
   </div>
   <div class="py-2.5 ml-auto flex items-center shrink-0">
     <span id="thinking-badge" style="display:none" class="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 border border-zinc-200 rounded-full px-2.5 py-1">
@@ -554,6 +596,16 @@ const HTML = `<!DOCTYPE html>
     <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Token growth</h3>
     <canvas id="sparkline" height="60" class="w-full rounded bg-zinc-50 block"></canvas>
     <p class="text-[10px] text-zinc-300 cw-submuted mt-1">Orange dashes = 150k compaction threshold</p>
+  </div>
+</div>
+
+<!-- Starting Context Breakdown -->
+<div class="px-4 pb-6" id="starting-ctx-section" style="display:none">
+  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+    <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-1">Starting context breakdown</h3>
+    <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Tokens consumed before the first user message</p>
+    <div id="starting-ctx-entries" class="space-y-2.5"></div>
+    <div id="starting-ctx-warnings" class="mt-3 space-y-1.5"></div>
   </div>
 </div>
 
@@ -643,20 +695,24 @@ function fmtAgo(isoStr) {
 }
 
 function renderStats(s) {
+  lastStats = s;
   document.getElementById('model-name').textContent = s.model;
   document.getElementById('turn-count').textContent = s.turns ? s.turns.length : s.blocks.filter(b => b.type === 'user').length;
   document.getElementById('stat-used').textContent = s.tokensUsed.toLocaleString();
   document.getElementById('stat-remaining').textContent = s.tokensRemaining.toLocaleString();
   document.getElementById('stat-pct').textContent = s.capacityPct.toFixed(1) + '%';
   document.getElementById('stat-blocks').textContent = s.contentBlocks;
+  document.getElementById('stat-skills').textContent = s.skillsLoaded.length;
 
   const fill = document.getElementById('capacity-fill');
   fill.style.width = s.capacityPct + '%';
   document.getElementById('capacity-label').textContent = s.capacityPct.toFixed(1) + '%';
 
+  // Compaction warning
   const banner = document.getElementById('compaction-banner');
   banner.style.display = s.compactionWarning ? 'flex' : 'none';
 
+  // Meta bar
   document.getElementById('meta-cache').textContent = s.cacheHitPct + '%';
   document.getElementById('meta-cost').textContent = '$' + s.estimatedCostUsd.toFixed(4);
   if (s.sessionStartedAt && s.sessionLastActivityAt) {
@@ -667,9 +723,12 @@ function renderStats(s) {
   const thinkingBadge = document.getElementById('thinking-badge');
   thinkingBadge.style.display = s.hasThinking ? 'flex' : 'none';
 
+  renderContextMap(s.blocks);
   renderStackedBlocks(s.blocks);
   renderSparkline(s.turns || []);
   renderTypeBreakdown(s.byType, s.tokensUsed);
+  renderStartingContext(s.startingContext);
+  renderNotable(s);
 }
 
 function renderSparkline(turns) {
@@ -681,29 +740,39 @@ function renderSparkline(turns) {
   const H = 60;
   ctx.clearRect(0, 0, W, H);
 
+  const dk = document.documentElement.classList.contains('dark');
+  const lineColor = dk ? '#a1a1aa' : '#3f3f46';
+  const fillColor = dk ? 'rgba(161,161,170,0.08)' : 'rgba(63,63,70,0.06)';
+
   const values = turns.map(t => t.inputTokens);
   const max = Math.max(...values, 1);
   const step = W / Math.max(values.length - 1, 1);
 
+  // Fill area
   ctx.beginPath();
   ctx.moveTo(0, H);
-  values.forEach((v, i) => ctx.lineTo(i * step, H - (v / max) * (H - 6) - 2));
+  values.forEach((v, i) => {
+    const x = i * step;
+    const y = H - (v / max) * (H - 6) - 2;
+    if (i === 0) ctx.lineTo(x, y); else ctx.lineTo(x, y);
+  });
   ctx.lineTo((values.length - 1) * step, H);
   ctx.closePath();
-  const dk = document.documentElement.classList.contains('dark');
-  ctx.fillStyle = dk ? 'rgba(161,161,170,0.08)' : 'rgba(63,63,70,0.06)';
+  ctx.fillStyle = fillColor;
   ctx.fill();
 
+  // Line
   ctx.beginPath();
   values.forEach((v, i) => {
     const x = i * step;
     const y = H - (v / max) * (H - 6) - 2;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
-  ctx.strokeStyle = dk ? '#a1a1aa' : '#3f3f46';
+  ctx.strokeStyle = lineColor;
   ctx.lineWidth = 2;
   ctx.stroke();
 
+  // Compaction threshold line at 150k
   const threshY = H - (150000 / max) * (H - 6) - 2;
   if (threshY > 0 && threshY < H) {
     ctx.beginPath();
@@ -717,11 +786,15 @@ function renderSparkline(turns) {
   }
 }
 
+function renderContextMap(blocks) {
+  // no-op: #context-map is hidden
+}
+
 function renderStackedBlocks(blocks) {
   const container = document.getElementById('stacked-blocks');
   container.innerHTML = '';
   if (!blocks.length) {
-    container.innerHTML = '<p style="font-size:12px;color:#a1a1aa;padding:16px 0;text-align:center">No context blocks yet</p>';
+    container.innerHTML = '<p class="text-xs text-zinc-400 py-4 text-center">No context blocks yet</p>';
     return;
   }
 
@@ -772,12 +845,13 @@ function renderTypeBreakdown(byType, total) {
       const color = TYPE_COLORS[type] || '#a1a1aa';
       const pct = (tokens / maxVal * 100).toFixed(1);
       const dk = document.documentElement.classList.contains('dark');
+      const labelColor = dk ? '#71717a' : '#71717a';
       const barBg = dk ? '#3f3f46' : '#f4f4f5';
       const barFill = dk ? '#e4e4e7' : '#3f3f46';
       const countColor = dk ? '#a1a1aa' : '#52525b';
       return \`<div style="display:flex;align-items:center;gap:10px">
         <span style="width:6px;height:6px;border-radius:50%;background:\${color};flex-shrink:0;display:block"></span>
-        <span style="font-size:11px;color:#71717a;width:64px;flex-shrink:0">\${TYPE_LABELS[type] || type}</span>
+        <span style="font-size:11px;color:\${labelColor};width:64px;flex-shrink:0">\${TYPE_LABELS[type] || type}</span>
         <div style="flex:1;height:4px;background:\${barBg};border-radius:99px;overflow:hidden">
           <div style="height:100%;background:\${barFill};border-radius:99px;width:\${pct}%"></div>
         </div>
@@ -786,40 +860,114 @@ function renderTypeBreakdown(byType, total) {
     }).join('');
 }
 
+function renderNotable(s) {
+  // no-op: #notable-items is hidden
+}
+
+function renderStartingContext(sc) {
+  const section = document.getElementById('starting-ctx-section');
+  if (!sc || !sc.entries || !sc.entries.length || sc.total === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+
+  const total = sc.total || 1;
+  const dk = document.documentElement.classList.contains('dark');
+  const labelColor = dk ? '#71717a' : '#71717a';
+  const countColor = dk ? '#a1a1aa' : '#52525b';
+  const barBg = dk ? '#3f3f46' : '#f4f4f5';
+  const panelBg = dk ? '#27272a' : 'white';
+
+  const ENTRY_COLORS = [
+    ['Tool schemas', '#6366f1'],
+    ['CLAUDE.md (global)', '#f59e0b'],
+    ['CLAUDE.md (project)', '#f97316'],
+    ['MEMORY.md', '#10b981'],
+    ['Session context', '#3b82f6'],
+  ];
+  function colorFor(label) {
+    const match = ENTRY_COLORS.find(([k]) => label.includes(k));
+    return match ? match[1] : '#a1a1aa';
+  }
+
+  const entries = document.getElementById('starting-ctx-entries');
+  entries.innerHTML = sc.entries.map(e => {
+    const pct = Math.min((e.tokens / total * 100), 100);
+    const pctStr = pct.toFixed(1);
+    const color = colorFor(e.label);
+    return \`<div style="display:flex;align-items:center;gap:10px" title="\${escHtml(e.path||e.label)}">
+      <span style="width:6px;height:6px;border-radius:50%;background:\${color};flex-shrink:0;display:block"></span>
+      <span style="font-size:11px;color:\${labelColor};width:190px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(e.label)}</span>
+      <div style="flex:1;height:4px;background:\${barBg};border-radius:99px;overflow:hidden">
+        <div style="height:100%;background:\${color};border-radius:99px;width:\${pctStr}%"></div>
+      </div>
+      <span style="font-size:11px;font-weight:500;color:\${countColor};width:44px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(e.tokens)}</span>
+      <span style="font-size:11px;color:\${labelColor};width:38px;text-align:right;flex-shrink:0">\${pctStr}%</span>
+    </div>\`;
+  }).join('');
+
+  const warnings = sc.entries.filter(e => e.warning);
+  const warningsEl = document.getElementById('starting-ctx-warnings');
+  warningsEl.innerHTML = warnings.map(e =>
+    \`<div style="font-size:11px;color:#f59e0b;display:flex;align-items:flex-start;gap:6px">
+      <span style="flex-shrink:0">⚠️</span>
+      <span><strong>\${escHtml(e.label)}:</strong> \${escHtml(e.warning)}</span>
+    </div>\`
+  ).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+let lastStats = null;
 function toggleDark() {
   const isDark = document.documentElement.classList.toggle('dark');
   localStorage.setItem('cw-dark', isDark ? '1' : '0');
   document.getElementById('dark-icon').textContent = isDark ? '🌙' : '☀️';
+  if (lastStats) renderStats(lastStats);
 }
 
+// Sync icon to current state on load
 document.addEventListener('DOMContentLoaded', () => {
   const isDark = document.documentElement.classList.contains('dark');
   const icon = document.getElementById('dark-icon');
   if (icon) icon.textContent = isDark ? '🌙' : '☀️';
 });
 
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
+// Start
 connect(null);
 </script>
 </body>
 </html>`;
 
-// ─── WebSocket State ──────────────────────────────────────────────────────────
+// ─── WebSocket State ─────────────────────────────────────────────────────────
 
-const clients = new Set<{ ws: WebSocket; sessionId: string | null }>();
+const clients = new Set<{
+  ws: WebSocket;
+  sessionId: string | null;
+}>();
 
 async function broadcastToClient(
   client: { ws: WebSocket; sessionId: string | null },
   sessions: Array<{ id: string; mtime: number }>
 ) {
-  if ((client.ws as unknown as { readyState: number }).readyState !== 1) return;
-  client.ws.send(JSON.stringify({ type: "sessions", sessions, active: client.sessionId ?? sessions[0]?.id ?? null }));
-  const sid = client.sessionId ?? sessions[0]?.id;
-  if (!sid) return;
-  const stats = await parseSession(sid);
+  if (client.ws.readyState !== 1) return;
+
+  // Send session list
+  client.ws.send(
+    JSON.stringify({
+      type: "sessions",
+      sessions: sessions.map((s) => ({ id: s.id, mtime: s.mtime })),
+      active: client.sessionId ?? sessions[0]?.id ?? null,
+    })
+  );
+
+  const sessionId = client.sessionId ?? sessions[0]?.id;
+  if (!sessionId) return;
+
+  const stats = await parseSession(sessionId);
   client.ws.send(JSON.stringify({ type: "stats", stats }));
 }
 
@@ -833,59 +981,99 @@ function setupWatcher() {
       if (watchDebounce) clearTimeout(watchDebounce);
       watchDebounce = setTimeout(async () => {
         const sessions = await findActiveSessions();
-        for (const client of clients) await broadcastToClient(client, sessions);
+        for (const client of clients) {
+          await broadcastToClient(client, sessions);
+        }
       }, 500);
     });
   } catch {
+    // Watcher setup failed — polling fallback
     setInterval(async () => {
-      if (!clients.size) return;
+      if (clients.size === 0) return;
       const sessions = await findActiveSessions();
-      for (const client of clients) await broadcastToClient(client, sessions);
+      for (const client of clients) {
+        await broadcastToClient(client, sessions);
+      }
     }, 5000);
   }
 }
 
 // ─── HTTP Server ──────────────────────────────────────────────────────────────
 
-async function main() {
-  PROJECTS_DIR = await resolveProjectDir();
-  console.log(`Watching: ${PROJECTS_DIR}`);
+const server = Bun.serve({
+  port: PORT,
+  async fetch(req, server) {
+    const url = new URL(req.url);
 
-  const server = Bun.serve({
-    port: PORT,
-    async fetch(req, server) {
-      const url = new URL(req.url);
-      if (req.headers.get("upgrade") === "websocket") {
-        const sid = url.searchParams.get("session") || null;
-        const client = { ws: null as unknown as WebSocket, sessionId: sid };
-        const ok = server.upgrade(req, { data: client });
-        if (!ok) return new Response("WS upgrade failed", { status: 400 });
-        return undefined as unknown as Response;
+    // WebSocket upgrade
+    if (req.headers.get("upgrade") === "websocket") {
+      const sessionId = url.searchParams.get("session") || null;
+      const client = { ws: null as unknown as WebSocket, sessionId };
+
+      const upgraded = server.upgrade(req, { data: client });
+      if (!upgraded) return new Response("WS upgrade failed", { status: 400 });
+      return undefined as unknown as Response;
+    }
+
+    // API: session list
+    if (url.pathname === "/api/sessions") {
+      const sessions = await findActiveSessions();
+      return new Response(JSON.stringify(sessions), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // API: session stats
+    if (url.pathname.startsWith("/api/stats/")) {
+      const id = url.pathname.slice("/api/stats/".length);
+      const stats = await parseSession(id);
+      return new Response(JSON.stringify(stats), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Mockup previews
+    if (url.pathname === "/mockup" || url.pathname === "/mockup-daisy" || url.pathname === "/mockup-shadcn") {
+      const { readFileSync } = await import("fs");
+      const file = url.pathname === "/mockup-daisy" ? "/tmp/cw-daisy.html"
+        : url.pathname === "/mockup-shadcn" ? "/tmp/cw-shadcn.html"
+        : "/tmp/cw-mockup.html";
+      try {
+        const html = readFileSync(file, "utf8");
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      } catch {
+        return new Response("Mockup not found", { status: 404 });
       }
-      if (url.pathname === "/api/sessions") {
-        return new Response(JSON.stringify(await findActiveSessions()), { headers: { "Content-Type": "application/json" } });
-      }
-      if (url.pathname.startsWith("/api/stats/")) {
-        return new Response(JSON.stringify(await parseSession(url.pathname.slice(11))), { headers: { "Content-Type": "application/json" } });
-      }
-      return new Response(HTML, { headers: { "Content-Type": "text/html" } });
+    }
+
+    // Serve HTML
+    return new Response(HTML, {
+      headers: { "Content-Type": "text/html" },
+    });
+  },
+
+  websocket: {
+    async open(ws) {
+      const client = ws.data as { ws: WebSocket; sessionId: string | null };
+      client.ws = ws as unknown as WebSocket;
+      clients.add(client);
+
+      const sessions = await findActiveSessions();
+      await broadcastToClient(client, sessions);
     },
-    websocket: {
-      async open(ws) {
-        const client = ws.data as { ws: WebSocket; sessionId: string | null };
-        client.ws = ws as unknown as WebSocket;
-        clients.add(client);
-        await broadcastToClient(client, await findActiveSessions());
-      },
-      message() {},
-      close(ws) {
-        clients.delete(ws.data as { ws: WebSocket; sessionId: string | null });
-      },
+
+    message() {
+      // No client→server messages needed
     },
-  });
 
-  setupWatcher();
-  console.log(`Context Window running at http://localhost:${PORT}`);
-}
+    close(ws) {
+      const client = ws.data as { ws: WebSocket; sessionId: string | null };
+      clients.delete(client);
+    },
+  },
+});
 
-main().catch((e) => { console.error(e.message); process.exit(1); });
+setupWatcher();
+
+console.log(`Context Window server running at http://localhost:${PORT}`);
+console.log(`Watching: ${PROJECTS_DIR}`);
