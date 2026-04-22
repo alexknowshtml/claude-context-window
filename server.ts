@@ -43,6 +43,35 @@ interface StartingContextBreakdown {
   entries: StartingContextEntry[];
 }
 
+interface MemoryFileEntry {
+  name: string;
+  path: string;
+  tokens: number;
+  lines: number;
+  type: string; // "user" | "feedback" | "project" | "reference" | "other"
+  warning?: string;
+}
+
+interface MemoryHealth {
+  totalFiles: number;
+  totalTokens: number;
+  indexLines: number;
+  indexLineLimit: number;
+  files: MemoryFileEntry[];
+}
+
+interface WasteItem {
+  type: "duplicate_read" | "large_result" | "unread_skill";
+  label: string;
+  tokens: number;
+  detail: string;
+}
+
+interface WasteReport {
+  items: WasteItem[];
+  totalWasteTokens: number;
+}
+
 interface TurnStat {
   turn: number;
   inputTokens: number;
@@ -75,6 +104,8 @@ interface SessionStats {
   compactionWarning: boolean;
   updatedAt: string;
   startingContext: StartingContextBreakdown;
+  memoryHealth: MemoryHealth;
+  wasteReport: WasteReport;
 }
 
 // ~3.5 chars per token approximation
@@ -100,6 +131,103 @@ function classifyContent(text: string, toolName?: string): BlockType {
       return "memory";
   }
   return "tool_result";
+}
+
+async function computeMemoryHealth(): Promise<MemoryHealth> {
+  const MEMORY_DIR = join(PROJECTS_DIR, "memory");
+  const INDEX_LINE_LIMIT = 200;
+
+  let indexLines = 0;
+  try {
+    const idx = await readFile(join(MEMORY_DIR, "MEMORY.md"), "utf-8");
+    indexLines = idx.split("\n").length;
+  } catch { /* ignore */ }
+
+  let files: MemoryFileEntry[] = [];
+  try {
+    const entries = await readdir(MEMORY_DIR);
+    const mdFiles = entries.filter((f) => f.endsWith(".md") && f !== "MEMORY.md");
+    files = await Promise.all(
+      mdFiles.map(async (fname) => {
+        const fpath = join(MEMORY_DIR, fname);
+        const content = await readFile(fpath, "utf-8").catch(() => "");
+        const tokens = estTokens(content);
+        const lines = content.split("\n").length;
+        // infer type from filename prefix
+        const typeMatch = fname.match(/^(user|feedback|project|reference)_/);
+        const type = typeMatch ? typeMatch[1] : "other";
+        let warning: string | undefined;
+        if (tokens > 1500) warning = `${tokens.toLocaleString()} tokens — consider summarizing`;
+        else if (tokens > 800) warning = `${tokens.toLocaleString()} tokens — getting large`;
+        return { name: fname.replace(/\.md$/, ""), path: fpath, tokens, lines, type, warning };
+      })
+    );
+    files.sort((a, b) => b.tokens - a.tokens);
+  } catch { /* ignore */ }
+
+  return {
+    totalFiles: files.length,
+    totalTokens: files.reduce((s, f) => s + f.tokens, 0),
+    indexLines,
+    indexLineLimit: INDEX_LINE_LIMIT,
+    files,
+  };
+}
+
+function computeWasteReport(blocks: ContextBlock[]): WasteReport {
+  const items: WasteItem[] = [];
+
+  // Detect duplicate reads: same specific label appearing multiple times
+  // Skip generic labels (e.g. "Read result", "Bash result") — those are different files
+  const GENERIC_LABELS = /^(Read|Bash|Edit|Write|Glob|Grep|TodoWrite|Agent)\b/;
+  const readCounts = new Map<string, { count: number; tokens: number }>();
+  for (const b of blocks) {
+    if (b.type === "memory" || b.type === "skill_prompt") {
+      const key = b.label;
+      if (GENERIC_LABELS.test(key)) continue;
+      const existing = readCounts.get(key);
+      if (existing) {
+        existing.count++;
+        existing.tokens += b.tokens;
+      } else {
+        readCounts.set(key, { count: 1, tokens: b.tokens });
+      }
+    }
+  }
+  for (const [label, { count, tokens }] of readCounts) {
+    if (count > 1) {
+      items.push({
+        type: "duplicate_read",
+        label,
+        tokens,
+        detail: `Read ${count}× in this session`,
+      });
+    }
+  }
+
+  // Detect large single skill/memory loads (> 4k tokens)
+  for (const b of blocks) {
+    if (
+      (b.type === "skill_prompt" || b.type === "memory") &&
+      b.tokens > 4000 &&
+      !readCounts.get(b.label)
+    ) {
+      items.push({
+        type: "large_result",
+        label: b.label,
+        tokens: b.tokens,
+        detail: `${b.tokens.toLocaleString()} token result — consider truncation or summarization`,
+      });
+    }
+  }
+
+  // Sort by token waste desc
+  items.sort((a, b) => b.tokens - a.tokens);
+
+  return {
+    items,
+    totalWasteTokens: items.reduce((s, i) => s + i.tokens, 0),
+  };
 }
 
 async function readStartingContextFiles(): Promise<StartingContextEntry[]> {
@@ -158,7 +286,10 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     return emptyStats(sessionId);
   }
 
-  const startingContextFiles = await readStartingContextFiles();
+  const [startingContextFiles, memoryHealth] = await Promise.all([
+    readStartingContextFiles(),
+    computeMemoryHealth(),
+  ]);
 
   const lines = raw
     .trim()
@@ -376,6 +507,8 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     };
   }
 
+  const wasteReport = computeWasteReport(blocks);
+
   // Compute token totals by type
   const byType: Record<BlockType, number> = {
     system: 0,
@@ -434,6 +567,8 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     compactionWarning: tokensUsed >= 150_000,
     updatedAt: new Date().toISOString(),
     startingContext,
+    memoryHealth,
+    wasteReport,
   };
 }
 
@@ -458,6 +593,8 @@ function emptyStats(sessionId: string): SessionStats {
     compactionWarning: false,
     updatedAt: new Date().toISOString(),
     startingContext: { total: 0, entries: [] },
+    memoryHealth: { totalFiles: 0, totalTokens: 0, indexLines: 0, indexLineLimit: 200, files: [] },
+    wasteReport: { items: [], totalWasteTokens: 0 },
   };
 }
 
@@ -492,6 +629,8 @@ const HTML = `<!DOCTYPE html>
   html.dark #thinking-badge { border-color: #3f3f46 !important; color: #a1a1aa !important; }
   html.dark #dark-toggle { color: #a1a1aa !important; }
   html.dark #dark-toggle:hover { color: #e4e4e7 !important; }
+  .hidden { display: none !important; }
+  #mem-file-list { scrollbar-width: thin; }
 </style>
 <script>
   // Apply saved dark mode before render to avoid flash
@@ -606,6 +745,32 @@ const HTML = `<!DOCTYPE html>
     <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Tokens consumed before the first user message</p>
     <div id="starting-ctx-entries" class="space-y-2.5"></div>
     <div id="starting-ctx-warnings" class="mt-3 space-y-1.5"></div>
+  </div>
+</div>
+
+<!-- Memory Health -->
+<div class="px-4 pb-6" id="memory-health-section" style="display:none">
+  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+    <div class="flex items-center justify-between mb-1">
+      <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest">Memory health</h3>
+      <span class="text-[10px] text-zinc-400 cw-muted" id="mem-summary"></span>
+    </div>
+    <p class="text-[10px] text-zinc-300 cw-submuted mb-3">All files in <code>~/.claude/projects/.../memory/</code> sorted by token cost</p>
+    <div id="mem-index-warning" class="mb-3 hidden"></div>
+    <div id="mem-file-list" class="space-y-1.5 max-h-64 overflow-y-auto"></div>
+  </div>
+</div>
+
+<!-- Session Waste -->
+<div class="px-4 pb-6" id="waste-section" style="display:none">
+  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+    <div class="flex items-center justify-between mb-1">
+      <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest">Session waste</h3>
+      <span class="text-[10px] text-zinc-400 cw-muted" id="waste-summary"></span>
+    </div>
+    <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Duplicate reads, oversized results, and refactoring candidates</p>
+    <div id="waste-items" class="space-y-2"></div>
+    <p id="waste-empty" class="text-xs text-zinc-400 cw-muted text-center py-4" style="display:none">No obvious waste detected in this session</p>
   </div>
 </div>
 
@@ -728,6 +893,8 @@ function renderStats(s) {
   renderSparkline(s.turns || []);
   renderTypeBreakdown(s.byType, s.tokensUsed);
   renderStartingContext(s.startingContext);
+  renderMemoryHealth(s.memoryHealth);
+  renderWasteReport(s.wasteReport);
   renderNotable(s);
 }
 
@@ -858,6 +1025,90 @@ function renderTypeBreakdown(byType, total) {
         <span style="font-size:11px;font-weight:500;color:\${countColor};width:40px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(tokens)}</span>
       </div>\`;
     }).join('');
+}
+
+function renderMemoryHealth(mh) {
+  const section = document.getElementById('memory-health-section');
+  if (!mh || !mh.totalFiles) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  const dk = document.documentElement.classList.contains('dark');
+  const labelColor = dk ? '#a1a1aa' : '#52525b';
+  const mutedColor = dk ? '#71717a' : '#a1a1aa';
+  const warnColor = '#f59e0b';
+  const dangerColor = '#ef4444';
+
+  document.getElementById('mem-summary').textContent =
+    \`\${mh.totalFiles} files · \${fmt(mh.totalTokens)} tokens total\`;
+
+  const indexWarn = document.getElementById('mem-index-warning');
+  if (mh.indexLines > mh.indexLineLimit) {
+    indexWarn.className = '';
+    indexWarn.innerHTML = \`<div style="font-size:11px;color:\${dangerColor};display:flex;gap:6px;align-items:flex-start;margin-bottom:8px">
+      <span>🔴</span><span>MEMORY.md is <strong>\${mh.indexLines} lines</strong> (limit: \${mh.indexLineLimit}) — entries past line \${mh.indexLineLimit} are not loaded into context</span>
+    </div>\`;
+  } else {
+    indexWarn.className = 'hidden';
+  }
+
+  const TYPE_COLORS_MEM = { user: '#3b82f6', feedback: '#ec4899', project: '#f59e0b', reference: '#10b981', other: '#a1a1aa' };
+  const list = document.getElementById('mem-file-list');
+  const maxTok = Math.max(...mh.files.map(f => f.tokens), 1);
+  list.innerHTML = mh.files.slice(0, 50).map(f => {
+    const color = TYPE_COLORS_MEM[f.type] || '#a1a1aa';
+    const barBg = dk ? '#3f3f46' : '#f4f4f5';
+    const barPct = (f.tokens / maxTok * 100).toFixed(1);
+    const warnIcon = f.tokens > 1500 ? '🔴' : f.tokens > 800 ? '🟡' : '';
+    return \`<div style="display:flex;align-items:center;gap:8px">
+      <span style="width:5px;height:5px;border-radius:50%;background:\${color};flex-shrink:0"></span>
+      <span style="font-size:10px;color:\${mutedColor};width:64px;flex-shrink:0;text-transform:uppercase;letter-spacing:0.04em">\${escHtml(f.type)}</span>
+      <span style="font-size:11px;color:\${labelColor};flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="\${escHtml(f.name)}">\${escHtml(f.name.replace(/^(user|feedback|project|reference)_/, ''))}</span>
+      <div style="width:60px;height:3px;background:\${barBg};border-radius:99px;overflow:hidden;flex-shrink:0">
+        <div style="height:100%;background:\${color};border-radius:99px;width:\${barPct}%"></div>
+      </div>
+      <span style="font-size:11px;color:\${mutedColor};width:36px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(f.tokens)}</span>
+      \${warnIcon ? \`<span style="flex-shrink:0;font-size:10px">\${warnIcon}</span>\` : '<span style="width:13px;flex-shrink:0"></span>'}
+    </div>\`;
+  }).join('');
+}
+
+function renderWasteReport(wr) {
+  const section = document.getElementById('waste-section');
+  if (!wr) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  const dk = document.documentElement.classList.contains('dark');
+  const labelColor = dk ? '#d4d4d8' : '#3f3f46';
+  const mutedColor = dk ? '#71717a' : '#a1a1aa';
+
+  document.getElementById('waste-summary').textContent =
+    wr.totalWasteTokens > 0 ? \`~\${fmt(wr.totalWasteTokens)} tokens recoverable\` : 'Clean';
+
+  const itemsEl = document.getElementById('waste-items');
+  const emptyEl = document.getElementById('waste-empty');
+
+  if (!wr.items.length) {
+    itemsEl.innerHTML = '';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const TYPE_ICONS = { duplicate_read: '♻️', large_result: '📦', unread_skill: '💤' };
+  const TYPE_COLOR = { duplicate_read: '#f59e0b', large_result: '#ef4444', unread_skill: '#a1a1aa' };
+
+  itemsEl.innerHTML = wr.items.map(item => {
+    const color = TYPE_COLOR[item.type] || '#a1a1aa';
+    const icon = TYPE_ICONS[item.type] || '⚠️';
+    return \`<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid \${dk ? '#3f3f46' : '#f4f4f5'}">
+      <span style="font-size:12px;flex-shrink:0">\${icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:\${labelColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(item.label)}</div>
+        <div style="font-size:11px;color:\${mutedColor};margin-top:1px">\${escHtml(item.detail)}</div>
+      </div>
+      <span style="font-size:11px;font-weight:600;color:\${color};flex-shrink:0;font-variant-numeric:tabular-nums">\${fmt(item.tokens)}</span>
+    </div>\`;
+  }).join('');
 }
 
 function renderNotable(s) {
