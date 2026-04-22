@@ -719,14 +719,8 @@ const HTML = `<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Context blocks -->
-<div class="p-4 space-y-1">
-  <p class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Context blocks</p>
-  <div id="stacked-blocks" class="space-y-1"></div>
-</div>
-
-<!-- Bottom cards -->
-<div class="px-4 pb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+<!-- Top cards: By type + Token growth -->
+<div class="px-4 pt-4 pb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
   <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
     <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">By type</h3>
     <div id="type-breakdown" class="space-y-2.5"></div>
@@ -771,6 +765,14 @@ const HTML = `<!DOCTYPE html>
     <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Duplicate reads, oversized results, and refactoring candidates</p>
     <div id="waste-items" class="space-y-2"></div>
     <p id="waste-empty" class="text-xs text-zinc-400 cw-muted text-center py-4" style="display:none">No obvious waste detected in this session</p>
+  </div>
+</div>
+
+<!-- Context blocks (scrollable) -->
+<div class="px-4 pb-6">
+  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+    <p class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Context blocks</p>
+    <div id="stacked-blocks" class="space-y-1 max-h-96 overflow-y-auto pr-1" style="scrollbar-width:thin"></div>
   </div>
 </div>
 
