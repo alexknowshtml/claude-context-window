@@ -432,295 +432,327 @@ const HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Context Window</title>
+<script src="https://cdn.tailwindcss.com"><\/script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-  :root {
-    --bg:      #fdf7ff; --bg2: #f5eef8; --bg3: #ece0f0;
-    --border:  #ddd0e8; --text: #2d1f3d; --muted: #9580a8; --accent: #7c3aed;
-    --c-system: #a855f7; --c-skill: #ec4899; --c-memory: #10b981;
-    --c-user: #6366f1; --c-assistant: #d97706; --c-tool: #ef4444;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 13px; line-height: 1.5; }
-
-  header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; background: #fdf4ff; }
-  .live-badge { color: #3a9e72; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
-  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #3a9e72; animation: pulse 1.8s infinite; flex-shrink: 0; }
-  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
-  h1 { font-size: 20px; color: var(--accent); font-weight: 600; letter-spacing: -0.3px; }
-  .model-info { text-align: right; color: var(--muted); font-size: 12px; line-height: 1.7; }
-  .model-info span { color: var(--text); font-weight: 500; }
-
-  .stats-bar { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--border); background: #fdf4ff; }
-  .stat { padding: 14px 16px; border-right: 1px solid var(--border); }
-  .stat:last-child { border-right: none; }
-  .stat-value { font-size: 24px; color: var(--accent); font-weight: 700; line-height: 1; letter-spacing: -0.5px; }
-  .stat-label { font-size: 10px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 5px; }
-
-  #compaction-banner { display: none; background: #fce7f3; border-bottom: 2px solid #ec4899; padding: 8px 20px; font-size: 12px; font-weight: 600; color: #831843; align-items: center; gap: 8px; }
-  #compaction-banner code { background: rgba(0,0,0,0.08); padding: 1px 5px; border-radius: 3px; }
-
-  .capacity-bar { height: 22px; background: var(--bg3); position: relative; border-bottom: 1px solid var(--border); overflow: hidden; }
-  .capacity-fill { height: 100%; background: linear-gradient(90deg, #a78bfa 0%, #ec4899 70%, #ef4444 100%); transition: width 0.6s ease; opacity: 0.75; }
-  .capacity-label { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); font-weight: 500; }
-
-  .meta-bar { display: flex; border-bottom: 1px solid var(--border); background: #f9f0fc; flex-wrap: wrap; }
-  .meta-item { padding: 7px 16px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 1px; }
-  .meta-item:last-child { border-right: none; }
-  .meta-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-  .meta-value { font-size: 13px; color: var(--text); font-weight: 600; }
-
-  .legend { display: flex; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; background: #f9f0fc; }
-  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); font-weight: 500; }
-  .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; opacity: 0.85; }
-
-  .session-selector { padding: 10px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; background: #fdf4ff; }
-  .session-selector label { font-size: 11px; color: var(--muted); font-weight: 600; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.5px; }
-  .session-selector select { background: var(--bg); border: 1px solid var(--border); color: var(--text); font-size: 12px; padding: 4px 8px; border-radius: 6px; font-family: inherit; flex: 1; min-width: 0; outline: none; }
-  .session-selector select:focus { border-color: var(--accent); }
-
-  .main { display: grid; grid-template-columns: 210px 1fr 250px; height: calc(100vh - 200px); min-height: 400px; }
-
-  .context-map { border-right: 1px solid var(--border); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 3px; background: var(--bg); }
-  .context-map-label { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
-  .block-row { display: flex; align-items: stretch; gap: 6px; }
-  .block-bar { width: 7px; border-radius: 3px; flex-shrink: 0; opacity: 0.8; }
-  .block-info { flex: 1; overflow: hidden; }
-  .block-label { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .block-tokens { font-size: 10px; color: var(--text); font-weight: 500; }
-
-  .timeline { overflow-y: auto; padding: 12px; border-right: 1px solid var(--border); background: var(--bg2); }
-  .timeline-label { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
-  .timeline-note { font-size: 10px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
-  .stacked-container { display: flex; flex-direction: column; gap: 2px; }
-  .stacked-block { padding: 4px 10px; border-radius: 5px; cursor: default; opacity: 0.88; transition: opacity 0.12s, transform 0.1s; }
-  .stacked-block:hover { opacity: 1; transform: translateX(2px); }
-  .stacked-block-label { font-size: 10px; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-  .stacked-block-tok { font-size: 9px; color: rgba(255,255,255,0.65); }
-
-  .sidebar { overflow-y: auto; padding: 14px; background: var(--bg); }
-  .sidebar-section { margin-bottom: 20px; }
-  .sidebar-title { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
-  .type-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .type-bar-bg { flex: 1; height: 10px; background: var(--bg3); border-radius: 10px; overflow: hidden; }
-  .type-bar-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease; }
-  .type-name { width: 76px; font-size: 11px; color: var(--muted); flex-shrink: 0; font-weight: 500; }
-  .type-count { width: 40px; font-size: 11px; color: var(--text); text-align: right; flex-shrink: 0; font-weight: 600; }
-
-  .notable-item { background: #fdf4ff; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(60,30,10,0.05); }
-  .notable-tag { font-size: 9px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
-  .notable-value { font-size: 12px; color: var(--text); font-weight: 500; margin-bottom: 2px; }
-  .notable-sub { font-size: 10px; color: var(--muted); line-height: 1.4; }
-
-  .loading { display: flex; align-items: center; justify-content: center; height: 200px; color: var(--muted); font-size: 13px; }
-
-  @media (max-width: 700px) {
-    .stats-bar { grid-template-columns: repeat(3, 1fr); }
-    .stat { padding: 10px; }
-    .stat-value { font-size: 20px; }
-    .stat-label { font-size: 8px; }
-    .main { display: flex; flex-direction: column; height: auto; }
-    .context-map { border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; order: 2; }
-    .timeline { border-right: none; border-bottom: 1px solid var(--border); max-height: 55vh; order: 1; }
-    .sidebar { order: 3; }
-  }
-  @media (max-width: 420px) {
-    .stats-bar { grid-template-columns: repeat(2, 1fr); }
-  }
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .live-dot { animation: pulse-dot 1.8s infinite; }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.8)} }
 </style>
 </head>
-<body>
+<body class="bg-zinc-50 text-zinc-900 min-h-screen">
 
-<header>
-  <div>
-    <div class="live-badge"><span class="live-dot"></span>LIVE SESSION</div>
-    <h1>Context Window</h1>
+<!-- Header -->
+<header class="bg-white border-b border-zinc-200 h-12 px-4 flex items-center gap-3">
+  <div class="flex items-center gap-2">
+    <span class="live-dot w-1.5 h-1.5 rounded-full bg-emerald-500 block shrink-0" id="map-loading"></span>
+    <span class="font-semibold text-sm tracking-tight">Context Window</span>
   </div>
-  <div class="model-info">
-    Model: <span id="model-name">—</span><br>
-    Limit: <span id="model-limit">—</span> tokens<br>
-    Turns: <span id="turn-count">0</span>
+  <span class="text-xs text-zinc-400 bg-zinc-100 rounded-md px-2 py-0.5 font-mono" id="model-name">—</span>
+  <span class="hidden text-xs text-zinc-400" id="turn-count"></span>
+  <span class="hidden" id="model-limit"></span>
+  <div class="ml-auto flex items-center gap-2">
+    <select id="session-select" onchange="selectSession(this.value)" class="text-xs text-zinc-600 bg-white border border-zinc-200 rounded-md px-2.5 py-1.5 outline-none font-sans">
+      <option value="">Loading…</option>
+    </select>
   </div>
 </header>
 
-<div class="stats-bar">
-  <div class="stat"><div class="stat-value" id="stat-used">—</div><div class="stat-label">Tokens Used</div></div>
-  <div class="stat"><div class="stat-value" id="stat-remaining" style="color:var(--c-user)">—</div><div class="stat-label">Remaining</div></div>
-  <div class="stat"><div class="stat-value" id="stat-pct">—%</div><div class="stat-label">Capacity Used</div></div>
-  <div class="stat"><div class="stat-value" id="stat-blocks">—</div><div class="stat-label">Content Blocks</div></div>
-  <div class="stat"><div class="stat-value" id="stat-skills">—</div><div class="stat-label">Skills Loaded</div></div>
-</div>
-
-<div id="compaction-banner">⚠️ Approaching context limit — consider running <code>/compact</code> or saving state</div>
-
-<div class="capacity-bar">
-  <div class="capacity-fill" id="capacity-fill" style="width:0%"></div>
-  <div class="capacity-label" id="capacity-label">0%</div>
-</div>
-
-<div class="meta-bar">
-  <div class="meta-item"><span class="meta-label">Cache hit</span><span class="meta-value" id="meta-cache">—</span></div>
-  <div class="meta-item"><span class="meta-label">Est. cost</span><span class="meta-value" id="meta-cost">—</span></div>
-  <div class="meta-item"><span class="meta-label">Duration</span><span class="meta-value" id="meta-duration">—</span></div>
-  <div class="meta-item"><span class="meta-label">Last activity</span><span class="meta-value" id="meta-last">—</span></div>
-  <div class="meta-item" id="thinking-badge" style="display:none"><span class="meta-label">Extended thinking</span><span class="meta-value" style="color:var(--c-system)">active</span></div>
-</div>
-
-<div class="legend">
-  <div class="legend-item"><div class="legend-dot" style="background:var(--c-system)"></div>System</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--c-skill)"></div>Skill Prompt</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--c-memory)"></div>Memory</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--c-user)"></div>User</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--c-assistant)"></div>Assistant</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--c-tool)"></div>Tool/Result</div>
-</div>
-
-<div class="session-selector">
-  <label>Session:</label>
-  <select id="session-select" onchange="selectSession(this.value)"><option>Loading…</option></select>
-</div>
-
-<div class="main">
-  <div class="context-map" id="context-map">
-    <div class="context-map-label">Context Map</div>
-    <div class="loading">Connecting…</div>
-  </div>
-  <div class="timeline">
-    <div class="timeline-label">Chronological Context Map</div>
-    <div class="timeline-note">Block height ∝ token count (log scale) · newest at top</div>
-    <canvas id="sparkline" height="60" style="width:100%;margin-bottom:8px;border-radius:4px;background:var(--bg3);display:block"></canvas>
-    <div class="stacked-container" id="stacked-blocks"></div>
-  </div>
-  <div class="sidebar">
-    <div class="sidebar-section">
-      <div class="sidebar-title">Token Breakdown by Type</div>
-      <div id="type-breakdown"></div>
+<!-- Token hero -->
+<div class="bg-white border-b border-zinc-200 px-4 py-4">
+  <div class="flex items-end justify-between mb-2.5">
+    <div>
+      <div class="flex items-baseline gap-1.5">
+        <span class="text-3xl font-bold tracking-tight tabular-nums" id="stat-used">—</span>
+        <span class="text-zinc-300 text-lg">/</span>
+        <span class="text-lg text-zinc-400 font-medium tabular-nums" id="stat-limit">200,000</span>
+        <span class="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest ml-0.5">tok</span>
+      </div>
+      <p class="text-[11px] text-zinc-400 mt-0.5"><span id="stat-remaining">—</span> remaining</p>
     </div>
-    <div class="sidebar-section">
-      <div class="sidebar-title">Notable Context Items</div>
-      <div id="notable-items"></div>
-    </div>
+    <span class="text-2xl font-bold text-zinc-800 tabular-nums" id="stat-pct">—%</span>
+  </div>
+  <div class="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+    <div class="h-full rounded-full bg-zinc-800 transition-all duration-500" id="capacity-fill" style="width:0%"></div>
+  </div>
+  <span class="hidden" id="capacity-label"></span>
+</div>
+
+<!-- Compaction banner -->
+<div id="compaction-banner" style="display:none" class="bg-orange-50 border-b border-orange-200 px-4 py-2 text-xs font-semibold text-orange-700 flex items-center gap-2">
+  ⚠️ Approaching context limit — consider running <code class="bg-orange-100 rounded px-1.5 py-0.5 font-mono">/compact</code> to save state
+</div>
+
+<!-- Stats strip -->
+<div class="bg-white border-b border-zinc-200 px-4 flex overflow-x-auto">
+  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+    <div class="text-sm font-semibold tabular-nums" id="meta-cost">$—</div>
+    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Cost</div>
+  </div>
+  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+    <div class="text-sm font-semibold text-emerald-600 tabular-nums" id="meta-cache">—%</div>
+    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Cache hit</div>
+  </div>
+  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+    <div class="text-sm font-semibold tabular-nums" id="meta-duration">—</div>
+    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Duration</div>
+  </div>
+  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+    <div class="text-sm font-semibold tabular-nums" id="stat-blocks">—</div>
+    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Blocks</div>
+  </div>
+  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+    <div class="text-sm font-semibold tabular-nums" id="meta-last">—</div>
+    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Activity</div>
+  </div>
+  <div class="py-2.5 ml-auto flex items-center shrink-0">
+    <span id="thinking-badge" style="display:none" class="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 border border-zinc-200 rounded-full px-2.5 py-1">
+      <span class="w-1.5 h-1.5 rounded-full bg-violet-400 block shrink-0"></span>
+      Extended thinking
+    </span>
   </div>
 </div>
+
+<!-- Context blocks -->
+<div class="p-4 space-y-1">
+  <p class="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-3">Context blocks</p>
+  <div id="stacked-blocks" class="space-y-1"></div>
+</div>
+
+<!-- Bottom cards -->
+<div class="px-4 pb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+  <div class="bg-white border border-zinc-200 rounded-lg p-4">
+    <h3 class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">By type</h3>
+    <div id="type-breakdown" class="space-y-2.5"></div>
+  </div>
+  <div class="bg-white border border-zinc-200 rounded-lg p-4">
+    <h3 class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">Token growth</h3>
+    <canvas id="sparkline" height="60" class="w-full rounded bg-zinc-50 block"></canvas>
+    <p class="text-[10px] text-zinc-300 mt-1">Orange dashes = 150k compaction threshold</p>
+  </div>
+</div>
+
+<!-- Hidden elements kept for JS compat -->
+<div id="context-map" style="display:none"></div>
+<div id="notable-items" style="display:none"></div>
 
 <script>
-const TYPE_COLORS = { system:'var(--c-system)', skill_prompt:'var(--c-skill)', memory:'var(--c-memory)', user:'var(--c-user)', assistant:'var(--c-assistant)', tool_result:'var(--c-tool)' };
-const TYPE_LABELS = { system:'System', skill_prompt:'Skill Prompt', memory:'Memory', user:'User', assistant:'Assistant', tool_result:'Tool/Result' };
+const TYPE_COLORS = {
+  system: '#8b5cf6',
+  skill_prompt: '#ec4899',
+  memory: '#10b981',
+  user: '#3b82f6',
+  assistant: '#f59e0b',
+  tool_result: '#a1a1aa',
+};
+const TYPE_LABELS = {
+  system: 'System',
+  skill_prompt: 'Skill',
+  memory: 'Memory',
+  user: 'User',
+  assistant: 'Assistant',
+  tool_result: 'Tool',
+};
 
-let ws=null, currentSessionId=null, reconnectTimer=null;
+let ws = null;
+let currentSessionId = null;
+let reconnectTimer = null;
 
-function fmt(n) { return n>=1000?(n/1000).toFixed(1)+'k':String(n); }
+function fmt(n) {
+  if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+  return String(n);
+}
 
-function connect(sid) {
-  if(ws){ws.close();ws=null;}
-  if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null;}
-  const proto=location.protocol==='https:'?'wss:':'ws:';
-  ws=new WebSocket(\`\${proto}//\${location.host}/ws\${sid?'?session='+sid:''}\`);
-  ws.onmessage=e=>{
-    const d=JSON.parse(e.data);
-    if(d.type==='sessions') populateSessions(d.sessions,d.active);
-    else if(d.type==='stats') renderStats(d.stats);
+function connect(sessionId) {
+  if (ws) { ws.close(); ws = null; }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = \`\${proto}//\${location.host}/ws\${sessionId ? '?session=' + sessionId : ''}\`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    document.getElementById('map-loading')?.remove();
   };
-  ws.onclose=()=>{reconnectTimer=setTimeout(()=>connect(currentSessionId),3000);};
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'sessions') {
+      populateSessions(data.sessions, data.active);
+    } else if (data.type === 'stats') {
+      renderStats(data.stats);
+    }
+  };
+
+  ws.onclose = () => {
+    reconnectTimer = setTimeout(() => connect(currentSessionId), 3000);
+  };
 }
 
-function populateSessions(sessions,active) {
-  const sel=document.getElementById('session-select');
-  sel.innerHTML=sessions.map(s=>\`<option value="\${s.id}" \${s.id===active?'selected':''}>\${s.id.slice(0,8)}… (\${new Date(s.mtime).toLocaleTimeString()})</option>\`).join('');
-  if(!currentSessionId&&active) currentSessionId=active;
+function populateSessions(sessions, active) {
+  const sel = document.getElementById('session-select');
+  sel.innerHTML = sessions.map(s =>
+    \`<option value="\${s.id}" \${s.id === active ? 'selected' : ''}>\${s.id.slice(0,8)}… (\${new Date(s.mtime).toLocaleTimeString()})</option>\`
+  ).join('');
+  if (!currentSessionId && active) {
+    currentSessionId = active;
+  }
 }
 
-function selectSession(id){currentSessionId=id;connect(id);}
+function selectSession(id) {
+  currentSessionId = id;
+  connect(id);
+}
 
-function fmtDur(ms){if(ms<60000)return Math.round(ms/1000)+'s';if(ms<3600000)return Math.round(ms/60000)+'m';return(ms/3600000).toFixed(1)+'h';}
-function fmtAgo(s){if(!s)return'—';const ms=Date.now()-new Date(s).getTime();return ms<5000?'just now':fmtDur(ms)+' ago';}
+function fmtDuration(ms) {
+  if (ms < 60000) return Math.round(ms/1000) + 's';
+  if (ms < 3600000) return Math.round(ms/60000) + 'm';
+  return (ms/3600000).toFixed(1) + 'h';
+}
+
+function fmtAgo(isoStr) {
+  if (!isoStr) return '—';
+  const ms = Date.now() - new Date(isoStr).getTime();
+  if (ms < 5000) return 'just now';
+  return fmtDuration(ms) + ' ago';
+}
 
 function renderStats(s) {
-  document.getElementById('model-name').textContent=s.model;
-  document.getElementById('model-limit').textContent=(s.tokensUsed+s.tokensRemaining).toLocaleString();
-  document.getElementById('turn-count').textContent=s.turns?s.turns.length:0;
-  document.getElementById('stat-used').textContent=s.tokensUsed.toLocaleString();
-  document.getElementById('stat-remaining').textContent=s.tokensRemaining.toLocaleString();
-  document.getElementById('stat-pct').textContent=s.capacityPct.toFixed(1)+'%';
-  document.getElementById('stat-blocks').textContent=s.contentBlocks;
-  document.getElementById('stat-skills').textContent=s.skillsLoaded.length;
-  document.getElementById('capacity-fill').style.width=s.capacityPct+'%';
-  document.getElementById('capacity-label').textContent=s.capacityPct.toFixed(1)+'%';
-  document.getElementById('compaction-banner').style.display=s.compactionWarning?'flex':'none';
-  document.getElementById('meta-cache').textContent=s.cacheHitPct+'%';
-  document.getElementById('meta-cost').textContent='$'+s.estimatedCostUsd.toFixed(4);
-  if(s.sessionStartedAt&&s.sessionLastActivityAt) {
-    document.getElementById('meta-duration').textContent=fmtDur(new Date(s.sessionLastActivityAt)-new Date(s.sessionStartedAt));
+  document.getElementById('model-name').textContent = s.model;
+  document.getElementById('turn-count').textContent = s.turns ? s.turns.length : s.blocks.filter(b => b.type === 'user').length;
+  document.getElementById('stat-used').textContent = s.tokensUsed.toLocaleString();
+  document.getElementById('stat-remaining').textContent = s.tokensRemaining.toLocaleString();
+  document.getElementById('stat-pct').textContent = s.capacityPct.toFixed(1) + '%';
+  document.getElementById('stat-blocks').textContent = s.contentBlocks;
+
+  const fill = document.getElementById('capacity-fill');
+  fill.style.width = s.capacityPct + '%';
+  document.getElementById('capacity-label').textContent = s.capacityPct.toFixed(1) + '%';
+
+  const banner = document.getElementById('compaction-banner');
+  banner.style.display = s.compactionWarning ? 'flex' : 'none';
+
+  document.getElementById('meta-cache').textContent = s.cacheHitPct + '%';
+  document.getElementById('meta-cost').textContent = '$' + s.estimatedCostUsd.toFixed(4);
+  if (s.sessionStartedAt && s.sessionLastActivityAt) {
+    const dur = new Date(s.sessionLastActivityAt) - new Date(s.sessionStartedAt);
+    document.getElementById('meta-duration').textContent = fmtDuration(dur);
   }
-  document.getElementById('meta-last').textContent=fmtAgo(s.sessionLastActivityAt);
-  document.getElementById('thinking-badge').style.display=s.hasThinking?'flex':'none';
-  renderContextMap(s.blocks);
+  document.getElementById('meta-last').textContent = fmtAgo(s.sessionLastActivityAt);
+  const thinkingBadge = document.getElementById('thinking-badge');
+  thinkingBadge.style.display = s.hasThinking ? 'flex' : 'none';
+
   renderStackedBlocks(s.blocks);
-  renderSparkline(s.turns||[]);
-  renderTypeBreakdown(s.byType);
-  renderNotable(s);
+  renderSparkline(s.turns || []);
+  renderTypeBreakdown(s.byType, s.tokensUsed);
 }
 
 function renderSparkline(turns) {
-  const c=document.getElementById('sparkline');
-  if(!c||!turns.length)return;
-  const ctx=c.getContext('2d'),W=c.offsetWidth||300,H=60;
-  c.width=W; ctx.clearRect(0,0,W,H);
-  const vals=turns.map(t=>t.inputTokens),max=Math.max(...vals,1),step=W/Math.max(vals.length-1,1);
-  ctx.beginPath(); ctx.moveTo(0,H);
-  vals.forEach((v,i)=>ctx.lineTo(i*step,H-(v/max)*(H-6)-2));
-  ctx.lineTo((vals.length-1)*step,H); ctx.closePath();
-  ctx.fillStyle='rgba(124,58,237,0.12)'; ctx.fill();
-  ctx.beginPath();
-  vals.forEach((v,i)=>{ const x=i*step,y=H-(v/max)*(H-6)-2; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  ctx.strokeStyle='#7c3aed'; ctx.lineWidth=2; ctx.stroke();
-  const ty=H-(150000/max)*(H-6)-2;
-  if(ty>0&&ty<H){ctx.beginPath();ctx.setLineDash([3,3]);ctx.moveTo(0,ty);ctx.lineTo(W,ty);ctx.strokeStyle='#ec4899';ctx.lineWidth=1;ctx.stroke();ctx.setLineDash([]);}
-}
+  const canvas = document.getElementById('sparkline');
+  if (!canvas || !turns.length) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 300;
+  canvas.width = W;
+  const H = 60;
+  ctx.clearRect(0, 0, W, H);
 
-function renderContextMap(blocks) {
-  const el=document.getElementById('context-map');
-  el.innerHTML='<div class="context-map-label">Context Map</div>';
-  const maxT=Math.max(...blocks.map(b=>b.tokens),1);
-  blocks.forEach(b=>{
-    const row=document.createElement('div'); row.className='block-row'; row.title=b.label;
-    row.innerHTML=\`<div class="block-bar" style="background:\${TYPE_COLORS[b.type]};min-height:3px;height:\${Math.max(3,Math.round(b.tokens/maxT*60))}px"></div><div class="block-info"><div class="block-label">\${esc(b.label)}</div><div class="block-tokens">\${fmt(b.tokens)} tok</div></div>\`;
-    el.appendChild(row);
+  const values = turns.map(t => t.inputTokens);
+  const max = Math.max(...values, 1);
+  const step = W / Math.max(values.length - 1, 1);
+
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  values.forEach((v, i) => ctx.lineTo(i * step, H - (v / max) * (H - 6) - 2));
+  ctx.lineTo((values.length - 1) * step, H);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(63, 63, 70, 0.06)';
+  ctx.fill();
+
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = i * step;
+    const y = H - (v / max) * (H - 6) - 2;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
+  ctx.strokeStyle = '#3f3f46';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const threshY = H - (150000 / max) * (H - 6) - 2;
+  if (threshY > 0 && threshY < H) {
+    ctx.beginPath();
+    ctx.setLineDash([3, 3]);
+    ctx.moveTo(0, threshY);
+    ctx.lineTo(W, threshY);
+    ctx.strokeStyle = '#f97316';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 }
 
 function renderStackedBlocks(blocks) {
-  const c=document.getElementById('stacked-blocks'); c.innerHTML='';
-  if(!blocks.length)return;
-  const maxT=Math.max(...blocks.map(b=>b.tokens),1),logMax=Math.log(maxT+1);
-  const MIN=14,MAX=160;
-  function bh(t){return Math.round(MIN+(Math.log(t+1)/logMax)*(MAX-MIN));}
-  [...blocks].reverse().forEach(b=>{
-    const h=bh(b.tokens),d=document.createElement('div');
-    d.className='stacked-block'; d.style.background=TYPE_COLORS[b.type]; d.style.height=h+'px';
-    d.title=\`\${b.label} — \${b.tokens.toLocaleString()} tokens\`;
-    d.innerHTML=h>=30?\`<div class="stacked-block-label">\${esc(TYPE_LABELS[b.type])} · \${esc(b.label.slice(0,40))}</div><div class="stacked-block-tok">\${b.tokens.toLocaleString()} tok</div>\`:h>=18?\`<div class="stacked-block-tok" style="font-size:8px;line-height:1">\${fmt(b.tokens)}</div>\`:'';
-    c.appendChild(d);
-  });
+  const container = document.getElementById('stacked-blocks');
+  container.innerHTML = '';
+  if (!blocks.length) {
+    container.innerHTML = '<p style="font-size:12px;color:#a1a1aa;padding:16px 0;text-align:center">No context blocks yet</p>';
+    return;
+  }
+
+  const maxTok = Math.max(...blocks.map(b => b.tokens), 1);
+  const MIN_H = 24;
+  const MAX_H = 80;
+  const logMax = Math.log(maxTok + 1);
+  function blockH(tokens) {
+    return Math.round(MIN_H + (Math.log(tokens + 1) / logMax) * (MAX_H - MIN_H));
+  }
+
+  const reversed = [...blocks].reverse();
+  for (const b of reversed) {
+    const h = blockH(b.tokens);
+    const color = TYPE_COLORS[b.type] || '#a1a1aa';
+    const label = TYPE_LABELS[b.type] || b.type;
+    const div = document.createElement('div');
+    div.title = \`\${b.label} — \${b.tokens.toLocaleString()} tokens\`;
+    div.style.cssText = \`display:flex;align-items:center;gap:12px;border-left:3px solid \${color};background:white;border-radius:0 6px 6px 0;padding:0 12px;height:\${h}px;border:1px solid #f4f4f5;border-left-width:3px;border-left-color:\${color};cursor:default;transition:background 0.1s\`;
+    div.onmouseenter = () => div.style.background = '#fafafa';
+    div.onmouseleave = () => div.style.background = 'white';
+    if (h >= 28) {
+      div.innerHTML = \`
+        <span style="font-size:10px;font-weight:700;color:\${color};text-transform:uppercase;letter-spacing:0.06em;width:64px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(label)}</span>
+        <span style="font-size:13px;color:#3f3f46;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(b.label)}</span>
+        <span style="font-size:11px;color:#a1a1aa;font-variant-numeric:tabular-nums;flex-shrink:0">\${b.tokens.toLocaleString()}</span>\`;
+    } else {
+      div.innerHTML = \`
+        <span style="font-size:10px;font-weight:700;color:\${color};text-transform:uppercase;letter-spacing:0.06em;width:64px;flex-shrink:0">\${escHtml(label)}</span>
+        <span style="font-size:11px;color:#a1a1aa;font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:auto">\${b.tokens.toLocaleString()}</span>\`;
+    }
+    container.appendChild(div);
+  }
 }
 
-function renderTypeBreakdown(byType) {
-  const maxV=Math.max(...Object.values(byType),1);
-  document.getElementById('type-breakdown').innerHTML=Object.entries(byType).map(([t,v])=>\`<div class="type-row"><div class="type-name" style="color:\${TYPE_COLORS[t]}">\${TYPE_LABELS[t]}</div><div class="type-bar-bg"><div class="type-bar-fill" style="width:\${(v/maxV*100).toFixed(1)}%;background:\${TYPE_COLORS[t]}"></div></div><div class="type-count">\${fmt(v)}</div></div>\`).join('');
+function renderTypeBreakdown(byType, total) {
+  const el = document.getElementById('type-breakdown');
+  const maxVal = Math.max(...Object.values(byType), 1);
+  el.innerHTML = Object.entries(byType)
+    .filter(([, tokens]) => tokens > 0)
+    .map(([type, tokens]) => {
+      const color = TYPE_COLORS[type] || '#a1a1aa';
+      const pct = (tokens / maxVal * 100).toFixed(1);
+      return \`<div style="display:flex;align-items:center;gap:10px">
+        <span style="width:6px;height:6px;border-radius:50%;background:\${color};flex-shrink:0;display:block"></span>
+        <span style="font-size:11px;color:#71717a;width:64px;flex-shrink:0">\${TYPE_LABELS[type] || type}</span>
+        <div style="flex:1;height:4px;background:#f4f4f5;border-radius:99px;overflow:hidden">
+          <div style="height:100%;background:#3f3f46;border-radius:99px;width:\${pct}%"></div>
+        </div>
+        <span style="font-size:11px;font-weight:500;color:#52525b;width:40px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(tokens)}</span>
+      </div>\`;
+    }).join('');
 }
 
-function renderNotable(s) {
-  const blocks=s.blocks;
-  const largest=blocks.reduce((a,b)=>a.tokens>b.tokens?a:b,{label:'—',tokens:0});
-  const longestTool=blocks.filter(b=>b.type==='tool_result').reduce((a,b)=>a.tokens>b.tokens?a:b,{label:'—',tokens:0});
-  document.getElementById('notable-items').innerHTML=\`
-    <div class="notable-item"><div class="notable-tag" style="color:var(--c-skill)">Largest Block</div><div class="notable-value">\${esc(largest.label.slice(0,40))}</div><div class="notable-sub">\${largest.tokens.toLocaleString()} tok</div></div>
-    <div class="notable-item"><div class="notable-tag" style="color:var(--c-tool)">Longest Tool Result</div><div class="notable-value">\${esc(longestTool.label.slice(0,40))}</div><div class="notable-sub">\${longestTool.tokens.toLocaleString()} tok</div></div>
-    <div class="notable-item"><div class="notable-tag" style="color:var(--c-system)">System Layer</div><div class="notable-value">~\${s.byType.system.toLocaleString()} tok</div><div class="notable-sub">Inferred from first-call cache creation</div></div>
-    \${s.skillsLoaded.length?'<div class="notable-item"><div class="notable-tag" style="color:var(--c-skill)">Skills Loaded</div><div class="notable-value">'+s.skillsLoaded.slice(0,5).join(', ')+'</div><div class="notable-sub">'+s.byType.skill_prompt.toLocaleString()+' tok total</div></div>':''}\`;
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-
-function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
 connect(null);
 </script>
