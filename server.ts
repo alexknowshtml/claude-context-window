@@ -54,10 +54,13 @@ interface MemoryFileEntry {
 
 interface MemoryHealth {
   totalFiles: number;
-  totalTokens: number;
+  indexTokens: number;
   indexLines: number;
   indexLineLimit: number;
-  files: MemoryFileEntry[];
+  indexTruncated: boolean;
+  sessionReads: MemoryFileEntry[];     // actually read this session
+  largeCandidates: MemoryFileEntry[];  // >800 tokens, not read — refactoring targets
+  files: MemoryFileEntry[];            // full catalog
 }
 
 interface WasteItem {
@@ -133,14 +136,16 @@ function classifyContent(text: string, toolName?: string): BlockType {
   return "tool_result";
 }
 
-async function computeMemoryHealth(): Promise<MemoryHealth> {
+async function computeMemoryHealth(blocks: ContextBlock[]): Promise<MemoryHealth> {
   const MEMORY_DIR = join(PROJECTS_DIR, "memory");
   const INDEX_LINE_LIMIT = 200;
 
   let indexLines = 0;
+  let indexTokens = 0;
   try {
     const idx = await readFile(join(MEMORY_DIR, "MEMORY.md"), "utf-8");
     indexLines = idx.split("\n").length;
+    indexTokens = estTokens(idx);
   } catch { /* ignore */ }
 
   let files: MemoryFileEntry[] = [];
@@ -153,23 +158,36 @@ async function computeMemoryHealth(): Promise<MemoryHealth> {
         const content = await readFile(fpath, "utf-8").catch(() => "");
         const tokens = estTokens(content);
         const lines = content.split("\n").length;
-        // infer type from filename prefix
         const typeMatch = fname.match(/^(user|feedback|project|reference)_/);
         const type = typeMatch ? typeMatch[1] : "other";
-        let warning: string | undefined;
-        if (tokens > 1500) warning = `${tokens.toLocaleString()} tokens — consider summarizing`;
-        else if (tokens > 800) warning = `${tokens.toLocaleString()} tokens — getting large`;
-        return { name: fname.replace(/\.md$/, ""), path: fpath, tokens, lines, type, warning };
+        return { name: fname.replace(/\.md$/, ""), path: fpath, tokens, lines, type };
       })
     );
     files.sort((a, b) => b.tokens - a.tokens);
   } catch { /* ignore */ }
 
+  // Which memory files were actually read this session?
+  const readLabels = new Set(
+    blocks.filter((b) => b.type === "memory").map((b) => b.label)
+  );
+  const sessionReads = files.filter((f) =>
+    readLabels.has(`memory/${f.name}`) || readLabels.has(f.name)
+  );
+  const sessionReadNames = new Set(sessionReads.map((f) => f.name));
+
+  // Large files not read this session — refactoring candidates
+  const largeCandidates = files.filter(
+    (f) => f.tokens > 800 && !sessionReadNames.has(f.name)
+  );
+
   return {
     totalFiles: files.length,
-    totalTokens: files.reduce((s, f) => s + f.tokens, 0),
+    indexTokens,
     indexLines,
     indexLineLimit: INDEX_LINE_LIMIT,
+    indexTruncated: indexLines > INDEX_LINE_LIMIT,
+    sessionReads,
+    largeCandidates,
     files,
   };
 }
@@ -286,10 +304,7 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     return emptyStats(sessionId);
   }
 
-  const [startingContextFiles, memoryHealth] = await Promise.all([
-    readStartingContextFiles(),
-    computeMemoryHealth(),
-  ]);
+  const startingContextFiles = await readStartingContextFiles();
 
   const lines = raw
     .trim()
@@ -507,6 +522,7 @@ async function parseSession(sessionId: string): Promise<SessionStats> {
     };
   }
 
+  const memoryHealth = await computeMemoryHealth(blocks);
   const wasteReport = computeWasteReport(blocks);
 
   // Compute token totals by type
@@ -593,7 +609,7 @@ function emptyStats(sessionId: string): SessionStats {
     compactionWarning: false,
     updatedAt: new Date().toISOString(),
     startingContext: { total: 0, entries: [] },
-    memoryHealth: { totalFiles: 0, totalTokens: 0, indexLines: 0, indexLineLimit: 200, files: [] },
+    memoryHealth: { totalFiles: 0, indexTokens: 0, indexLines: 0, indexLineLimit: 200, indexTruncated: false, sessionReads: [], largeCandidates: [], files: [] },
     wasteReport: { items: [], totalWasteTokens: 0 },
   };
 }
@@ -795,9 +811,8 @@ const HTML = `<!DOCTYPE html>
           <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest">Memory health</h3>
           <span class="text-[10px] text-zinc-400 cw-muted" id="mem-summary"></span>
         </div>
-        <p class="text-[10px] text-zinc-300 cw-submuted mb-3">All files in <code>~/.claude/.../memory/</code> sorted by token cost</p>
-        <div id="mem-index-warning" class="mb-3 hidden"></div>
-        <div id="mem-file-list" class="space-y-1.5 max-h-48 overflow-y-auto"></div>
+        <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Index always loaded · individual files only when read</p>
+        <div id="mem-file-list" class="max-h-64 overflow-y-auto" style="scrollbar-width:thin"></div>
       </div>
     </div>
 
@@ -1087,41 +1102,53 @@ function renderMemoryHealth(mh) {
   const dk = document.documentElement.classList.contains('dark');
   const labelColor = dk ? '#a1a1aa' : '#52525b';
   const mutedColor = dk ? '#71717a' : '#a1a1aa';
-  const warnColor = '#f59e0b';
-  const dangerColor = '#ef4444';
+  const sepColor = dk ? '#3f3f46' : '#f4f4f5';
 
   document.getElementById('mem-summary').textContent =
-    \`\${mh.totalFiles} files · \${fmt(mh.totalTokens)} tokens total\`;
-
-  const indexWarn = document.getElementById('mem-index-warning');
-  if (mh.indexLines > mh.indexLineLimit) {
-    indexWarn.className = '';
-    indexWarn.innerHTML = \`<div style="font-size:11px;color:\${dangerColor};display:flex;gap:6px;align-items:flex-start;margin-bottom:8px">
-      <span>🔴</span><span>MEMORY.md is <strong>\${mh.indexLines} lines</strong> (limit: \${mh.indexLineLimit}) — entries past line \${mh.indexLineLimit} are not loaded into context</span>
-    </div>\`;
-  } else {
-    indexWarn.className = 'hidden';
-  }
+    \`\${mh.totalFiles} files · index \${fmt(mh.indexTokens)} tok\`;
 
   const TYPE_COLORS_MEM = { user: '#3b82f6', feedback: '#ec4899', project: '#f59e0b', reference: '#10b981', other: '#a1a1aa' };
-  const list = document.getElementById('mem-file-list');
-  const maxTok = Math.max(...mh.files.map(f => f.tokens), 1);
-  list.innerHTML = mh.files.slice(0, 50).map(f => {
+
+  function fileRow(f, maxTok) {
     const color = TYPE_COLORS_MEM[f.type] || '#a1a1aa';
     const barBg = dk ? '#3f3f46' : '#f4f4f5';
     const barPct = (f.tokens / maxTok * 100).toFixed(1);
-    const warnIcon = f.tokens > 1500 ? '🔴' : f.tokens > 800 ? '🟡' : '';
+    const shortName = f.name.replace(/^(user|feedback|project|reference)_/, '');
     return \`<div style="display:flex;align-items:center;gap:8px">
       <span style="width:5px;height:5px;border-radius:50%;background:\${color};flex-shrink:0"></span>
-      <span style="font-size:10px;color:\${mutedColor};width:64px;flex-shrink:0;text-transform:uppercase;letter-spacing:0.04em">\${escHtml(f.type)}</span>
-      <span style="font-size:11px;color:\${labelColor};flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="\${escHtml(f.name)}">\${escHtml(f.name.replace(/^(user|feedback|project|reference)_/, ''))}</span>
-      <div style="width:60px;height:3px;background:\${barBg};border-radius:99px;overflow:hidden;flex-shrink:0">
+      <span style="font-size:11px;color:\${labelColor};flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="\${escHtml(f.name)}">\${escHtml(shortName)}</span>
+      <div style="width:48px;height:3px;background:\${barBg};border-radius:99px;overflow:hidden;flex-shrink:0">
         <div style="height:100%;background:\${color};border-radius:99px;width:\${barPct}%"></div>
       </div>
       <span style="font-size:11px;color:\${mutedColor};width:36px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(f.tokens)}</span>
-      \${warnIcon ? \`<span style="flex-shrink:0;font-size:10px">\${warnIcon}</span>\` : '<span style="width:13px;flex-shrink:0"></span>'}
     </div>\`;
-  }).join('');
+  }
+
+  function section_(title, badge, badgeColor, rows) {
+    if (!rows.length) return '';
+    const maxTok = Math.max(...rows.map(f => f.tokens), 1);
+    return \`<div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <span style="font-size:10px;font-weight:700;color:\${mutedColor};text-transform:uppercase;letter-spacing:0.06em">\${title}</span>
+        <span style="font-size:10px;background:\${badgeColor}22;color:\${badgeColor};border-radius:4px;padding:0 5px;font-weight:600">\${badge}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        \${rows.map(f => fileRow(f, maxTok)).join('')}
+      </div>
+    </div>\`;
+  }
+
+  const list = document.getElementById('mem-file-list');
+  const indexColor = mh.indexTruncated ? '#ef4444' : '#10b981';
+  const indexNote = mh.indexTruncated
+    ? \`<div style="font-size:11px;color:#ef4444;margin-bottom:10px;display:flex;gap:5px"><span>🔴</span><span>MEMORY.md is <strong>\${mh.indexLines} lines</strong> (limit \${mh.indexLineLimit}) — last \${mh.indexLines - mh.indexLineLimit} entries not loaded</span></div>\`
+    : '';
+
+  list.innerHTML = indexNote
+    + section_('Always loaded', \`\${fmt(mh.indexTokens)} tok\`, indexColor,
+        [{ name: 'MEMORY.md (index)', tokens: mh.indexTokens, type: 'other' }])
+    + section_('Read this session', \`\${mh.sessionReads.length}\`, '#3b82f6', mh.sessionReads)
+    + section_('Large candidates', \`\${mh.largeCandidates.length} files\`, '#f59e0b', mh.largeCandidates.slice(0, 10));
 }
 
 function renderWasteReport(wr) {
