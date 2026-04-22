@@ -632,6 +632,11 @@ const HTML = `<!DOCTYPE html>
   .hidden { display: none !important; }
   #mem-file-list { scrollbar-width: thin; }
 
+  /* Mobile: cap context blocks height */
+  @media (max-width: 767px) {
+    #stacked-blocks { max-height: 24rem; }
+  }
+
   /* Two-column layout on desktop */
   #layout-grid {
     display: flex;
