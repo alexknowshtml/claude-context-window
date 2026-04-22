@@ -438,12 +438,34 @@ const HTML = `<!DOCTYPE html>
   body { font-family: 'Inter', system-ui, sans-serif; }
   .live-dot { animation: pulse-dot 1.8s infinite; }
   @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.8)} }
+
+  /* Dark mode overrides */
+  html.dark body { background-color: #18181b !important; color: #f4f4f5 !important; }
+  html.dark header,
+  html.dark .cw-panel { background-color: #27272a !important; border-color: #3f3f46 !important; }
+  html.dark .cw-border-b { border-color: #3f3f46 !important; }
+  html.dark .cw-border-r { border-color: #52525b !important; }
+  html.dark .cw-muted { color: #a1a1aa !important; }
+  html.dark .cw-submuted { color: #71717a !important; }
+  html.dark .cw-progress-bg { background-color: #3f3f46 !important; }
+  html.dark .cw-progress-fill { background-color: #e4e4e7 !important; }
+  html.dark .cw-stat-pct { color: #e4e4e7 !important; }
+  html.dark #session-select { background-color: #27272a !important; color: #e4e4e7 !important; border-color: #3f3f46 !important; }
+  html.dark #model-name { background-color: #3f3f46 !important; color: #a1a1aa !important; }
+  html.dark #thinking-badge { border-color: #3f3f46 !important; color: #a1a1aa !important; }
+  html.dark #dark-toggle { color: #a1a1aa !important; }
+  html.dark #dark-toggle:hover { color: #e4e4e7 !important; }
 </style>
+<script>
+  if (localStorage.getItem('cw-dark') === '1') {
+    document.documentElement.classList.add('dark');
+  }
+<\/script>
 </head>
 <body class="bg-zinc-50 text-zinc-900 min-h-screen">
 
 <!-- Header -->
-<header class="bg-white border-b border-zinc-200 h-12 px-4 flex items-center gap-3">
+<header class="bg-white cw-panel cw-border-b border-b border-zinc-200 h-12 px-4 flex items-center gap-3">
   <div class="flex items-center gap-2">
     <span class="live-dot w-1.5 h-1.5 rounded-full bg-emerald-500 block shrink-0" id="map-loading"></span>
     <span class="font-semibold text-sm tracking-tight">Context Window</span>
@@ -452,6 +474,9 @@ const HTML = `<!DOCTYPE html>
   <span class="hidden text-xs text-zinc-400" id="turn-count"></span>
   <span class="hidden" id="model-limit"></span>
   <div class="ml-auto flex items-center gap-2">
+    <button id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" class="text-zinc-400 hover:text-zinc-700 w-7 h-7 flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors text-base leading-none">
+      <span id="dark-icon">☀️</span>
+    </button>
     <select id="session-select" onchange="selectSession(this.value)" class="text-xs text-zinc-600 bg-white border border-zinc-200 rounded-md px-2.5 py-1.5 outline-none font-sans">
       <option value="">Loading…</option>
     </select>
@@ -459,21 +484,21 @@ const HTML = `<!DOCTYPE html>
 </header>
 
 <!-- Token hero -->
-<div class="bg-white border-b border-zinc-200 px-4 py-4">
+<div class="bg-white cw-panel cw-border-b border-b border-zinc-200 px-4 py-4">
   <div class="flex items-end justify-between mb-2.5">
     <div>
       <div class="flex items-baseline gap-1.5">
         <span class="text-3xl font-bold tracking-tight tabular-nums" id="stat-used">—</span>
         <span class="text-zinc-300 text-lg">/</span>
-        <span class="text-lg text-zinc-400 font-medium tabular-nums" id="stat-limit">200,000</span>
-        <span class="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest ml-0.5">tok</span>
+        <span class="text-lg text-zinc-400 cw-muted font-medium tabular-nums" id="stat-limit">200,000</span>
+        <span class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest ml-0.5">tok</span>
       </div>
-      <p class="text-[11px] text-zinc-400 mt-0.5"><span id="stat-remaining">—</span> remaining</p>
+      <p class="text-[11px] text-zinc-400 cw-muted mt-0.5"><span id="stat-remaining">—</span> remaining</p>
     </div>
-    <span class="text-2xl font-bold text-zinc-800 tabular-nums" id="stat-pct">—%</span>
+    <span class="text-2xl font-bold text-zinc-800 cw-stat-pct tabular-nums" id="stat-pct">—%</span>
   </div>
-  <div class="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-    <div class="h-full rounded-full bg-zinc-800 transition-all duration-500" id="capacity-fill" style="width:0%"></div>
+  <div class="h-1.5 bg-zinc-100 cw-progress-bg rounded-full overflow-hidden">
+    <div class="h-full rounded-full bg-zinc-800 cw-progress-fill transition-all duration-500" id="capacity-fill" style="width:0%"></div>
   </div>
   <span class="hidden" id="capacity-label"></span>
 </div>
@@ -484,26 +509,26 @@ const HTML = `<!DOCTYPE html>
 </div>
 
 <!-- Stats strip -->
-<div class="bg-white border-b border-zinc-200 px-4 flex overflow-x-auto">
-  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+<div class="bg-white cw-panel cw-border-b border-b border-zinc-200 px-4 flex overflow-x-auto">
+  <div class="py-2.5 pr-5 mr-5 border-r cw-border-r border-zinc-100 shrink-0">
     <div class="text-sm font-semibold tabular-nums" id="meta-cost">$—</div>
-    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Cost</div>
+    <div class="text-[10px] text-zinc-400 cw-muted uppercase tracking-wider font-medium mt-0.5">Cost</div>
   </div>
-  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+  <div class="py-2.5 pr-5 mr-5 border-r cw-border-r border-zinc-100 shrink-0">
     <div class="text-sm font-semibold text-emerald-600 tabular-nums" id="meta-cache">—%</div>
-    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Cache hit</div>
+    <div class="text-[10px] text-zinc-400 cw-muted uppercase tracking-wider font-medium mt-0.5">Cache hit</div>
   </div>
-  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+  <div class="py-2.5 pr-5 mr-5 border-r cw-border-r border-zinc-100 shrink-0">
     <div class="text-sm font-semibold tabular-nums" id="meta-duration">—</div>
-    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Duration</div>
+    <div class="text-[10px] text-zinc-400 cw-muted uppercase tracking-wider font-medium mt-0.5">Duration</div>
   </div>
-  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+  <div class="py-2.5 pr-5 mr-5 border-r cw-border-r border-zinc-100 shrink-0">
     <div class="text-sm font-semibold tabular-nums" id="stat-blocks">—</div>
-    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Blocks</div>
+    <div class="text-[10px] text-zinc-400 cw-muted uppercase tracking-wider font-medium mt-0.5">Blocks</div>
   </div>
-  <div class="py-2.5 pr-5 mr-5 border-r border-zinc-100 shrink-0">
+  <div class="py-2.5 pr-5 mr-5 border-r cw-border-r border-zinc-100 shrink-0">
     <div class="text-sm font-semibold tabular-nums" id="meta-last">—</div>
-    <div class="text-[10px] text-zinc-400 uppercase tracking-wider font-medium mt-0.5">Activity</div>
+    <div class="text-[10px] text-zinc-400 cw-muted uppercase tracking-wider font-medium mt-0.5">Activity</div>
   </div>
   <div class="py-2.5 ml-auto flex items-center shrink-0">
     <span id="thinking-badge" style="display:none" class="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 border border-zinc-200 rounded-full px-2.5 py-1">
@@ -515,20 +540,20 @@ const HTML = `<!DOCTYPE html>
 
 <!-- Context blocks -->
 <div class="p-4 space-y-1">
-  <p class="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest mb-3">Context blocks</p>
+  <p class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Context blocks</p>
   <div id="stacked-blocks" class="space-y-1"></div>
 </div>
 
 <!-- Bottom cards -->
 <div class="px-4 pb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-  <div class="bg-white border border-zinc-200 rounded-lg p-4">
-    <h3 class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">By type</h3>
+  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+    <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">By type</h3>
     <div id="type-breakdown" class="space-y-2.5"></div>
   </div>
-  <div class="bg-white border border-zinc-200 rounded-lg p-4">
-    <h3 class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">Token growth</h3>
+  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+    <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Token growth</h3>
     <canvas id="sparkline" height="60" class="w-full rounded bg-zinc-50 block"></canvas>
-    <p class="text-[10px] text-zinc-300 mt-1">Orange dashes = 150k compaction threshold</p>
+    <p class="text-[10px] text-zinc-300 cw-submuted mt-1">Orange dashes = 150k compaction threshold</p>
   </div>
 </div>
 
@@ -665,7 +690,8 @@ function renderSparkline(turns) {
   values.forEach((v, i) => ctx.lineTo(i * step, H - (v / max) * (H - 6) - 2));
   ctx.lineTo((values.length - 1) * step, H);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(63, 63, 70, 0.06)';
+  const dk = document.documentElement.classList.contains('dark');
+  ctx.fillStyle = dk ? 'rgba(161,161,170,0.08)' : 'rgba(63,63,70,0.06)';
   ctx.fill();
 
   ctx.beginPath();
@@ -674,7 +700,7 @@ function renderSparkline(turns) {
     const y = H - (v / max) * (H - 6) - 2;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
-  ctx.strokeStyle = '#3f3f46';
+  ctx.strokeStyle = dk ? '#a1a1aa' : '#3f3f46';
   ctx.lineWidth = 2;
   ctx.stroke();
 
@@ -714,9 +740,13 @@ function renderStackedBlocks(blocks) {
     const label = TYPE_LABELS[b.type] || b.type;
     const div = document.createElement('div');
     div.title = \`\${b.label} — \${b.tokens.toLocaleString()} tokens\`;
-    div.style.cssText = \`display:flex;align-items:center;gap:12px;border-left:3px solid \${color};background:white;border-radius:0 6px 6px 0;padding:0 12px;height:\${h}px;border:1px solid #f4f4f5;border-left-width:3px;border-left-color:\${color};cursor:default;transition:background 0.1s\`;
-    div.onmouseenter = () => div.style.background = '#fafafa';
-    div.onmouseleave = () => div.style.background = 'white';
+    const isDark = document.documentElement.classList.contains('dark');
+    const bgColor = isDark ? '#27272a' : 'white';
+    const bgHover = isDark ? '#3f3f46' : '#fafafa';
+    const bColor = isDark ? '#3f3f46' : '#f4f4f5';
+    div.style.cssText = \`display:flex;align-items:center;gap:12px;border-left:3px solid \${color};background:\${bgColor};border-radius:0 6px 6px 0;padding:0 12px;height:\${h}px;border:1px solid \${bColor};border-left-width:3px;border-left-color:\${color};cursor:default;transition:background 0.1s\`;
+    div.onmouseenter = () => div.style.background = bgHover;
+    div.onmouseleave = () => div.style.background = bgColor;
     if (h >= 28) {
       div.innerHTML = \`
         <span style="font-size:10px;font-weight:700;color:\${color};text-transform:uppercase;letter-spacing:0.06em;width:64px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(label)}</span>
@@ -739,16 +769,32 @@ function renderTypeBreakdown(byType, total) {
     .map(([type, tokens]) => {
       const color = TYPE_COLORS[type] || '#a1a1aa';
       const pct = (tokens / maxVal * 100).toFixed(1);
+      const dk = document.documentElement.classList.contains('dark');
+      const barBg = dk ? '#3f3f46' : '#f4f4f5';
+      const barFill = dk ? '#e4e4e7' : '#3f3f46';
+      const countColor = dk ? '#a1a1aa' : '#52525b';
       return \`<div style="display:flex;align-items:center;gap:10px">
         <span style="width:6px;height:6px;border-radius:50%;background:\${color};flex-shrink:0;display:block"></span>
         <span style="font-size:11px;color:#71717a;width:64px;flex-shrink:0">\${TYPE_LABELS[type] || type}</span>
-        <div style="flex:1;height:4px;background:#f4f4f5;border-radius:99px;overflow:hidden">
-          <div style="height:100%;background:#3f3f46;border-radius:99px;width:\${pct}%"></div>
+        <div style="flex:1;height:4px;background:\${barBg};border-radius:99px;overflow:hidden">
+          <div style="height:100%;background:\${barFill};border-radius:99px;width:\${pct}%"></div>
         </div>
-        <span style="font-size:11px;font-weight:500;color:#52525b;width:40px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(tokens)}</span>
+        <span style="font-size:11px;font-weight:500;color:\${countColor};width:40px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(tokens)}</span>
       </div>\`;
     }).join('');
 }
+
+function toggleDark() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('cw-dark', isDark ? '1' : '0');
+  document.getElementById('dark-icon').textContent = isDark ? '🌙' : '☀️';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const isDark = document.documentElement.classList.contains('dark');
+  const icon = document.getElementById('dark-icon');
+  if (icon) icon.textContent = isDark ? '🌙' : '☀️';
+});
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
