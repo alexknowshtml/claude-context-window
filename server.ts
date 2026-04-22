@@ -744,18 +744,20 @@ function renderStackedBlocks(blocks) {
     const bgColor = isDark ? '#27272a' : 'white';
     const bgHover = isDark ? '#3f3f46' : '#fafafa';
     const bColor = isDark ? '#3f3f46' : '#f4f4f5';
+    const textColor = isDark ? '#d4d4d8' : '#3f3f46';
+    const mutedColor = isDark ? '#a1a1aa' : '#a1a1aa';
     div.style.cssText = \`display:flex;align-items:center;gap:12px;border-left:3px solid \${color};background:\${bgColor};border-radius:0 6px 6px 0;padding:0 12px;height:\${h}px;border:1px solid \${bColor};border-left-width:3px;border-left-color:\${color};cursor:default;transition:background 0.1s\`;
     div.onmouseenter = () => div.style.background = bgHover;
     div.onmouseleave = () => div.style.background = bgColor;
     if (h >= 28) {
       div.innerHTML = \`
         <span style="font-size:10px;font-weight:700;color:\${color};text-transform:uppercase;letter-spacing:0.06em;width:64px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(label)}</span>
-        <span style="font-size:13px;color:#3f3f46;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(b.label)}</span>
-        <span style="font-size:11px;color:#a1a1aa;font-variant-numeric:tabular-nums;flex-shrink:0">\${b.tokens.toLocaleString()}</span>\`;
+        <span style="font-size:13px;color:\${textColor};flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(b.label)}</span>
+        <span style="font-size:11px;color:\${mutedColor};font-variant-numeric:tabular-nums;flex-shrink:0">\${b.tokens.toLocaleString()}</span>\`;
     } else {
       div.innerHTML = \`
         <span style="font-size:10px;font-weight:700;color:\${color};text-transform:uppercase;letter-spacing:0.06em;width:64px;flex-shrink:0">\${escHtml(label)}</span>
-        <span style="font-size:11px;color:#a1a1aa;font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:auto">\${b.tokens.toLocaleString()}</span>\`;
+        <span style="font-size:11px;color:\${mutedColor};font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:auto">\${b.tokens.toLocaleString()}</span>\`;
     }
     container.appendChild(div);
   }
