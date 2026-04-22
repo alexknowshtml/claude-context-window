@@ -631,6 +631,41 @@ const HTML = `<!DOCTYPE html>
   html.dark #dark-toggle:hover { color: #e4e4e7 !important; }
   .hidden { display: none !important; }
   #mem-file-list { scrollbar-width: thin; }
+
+  /* Two-column layout on desktop */
+  #layout-grid {
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+  @media (min-width: 768px) {
+    #layout-grid {
+      flex-direction: row;
+      align-items: stretch;
+      height: calc(100vh - 11rem);
+      padding: 0.75rem;
+      gap: 0.75rem;
+      overflow: hidden;
+    }
+    #layout-left {
+      width: 22rem;
+      flex-shrink: 0;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    #layout-right {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    #layout-right > div {
+      flex: 1;
+      min-height: 0;
+    }
+  }
 </style>
 <script>
   // Apply saved dark mode before render to avoid flash
@@ -719,62 +754,72 @@ const HTML = `<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Top cards: By type + Token growth -->
-<div class="px-4 pt-4 pb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
-    <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">By type</h3>
-    <div id="type-breakdown" class="space-y-2.5"></div>
-  </div>
-  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
-    <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Token growth</h3>
-    <canvas id="sparkline" height="60" class="w-full rounded bg-zinc-50 block"></canvas>
-    <p class="text-[10px] text-zinc-300 cw-submuted mt-1">Orange dashes = 150k compaction threshold</p>
-  </div>
-</div>
+<!-- Two-column layout below the sticky header strip -->
+<div id="layout-grid">
 
-<!-- Starting Context Breakdown -->
-<div class="px-4 pb-6" id="starting-ctx-section" style="display:none">
-  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
-    <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-1">Starting context breakdown</h3>
-    <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Tokens consumed before the first user message</p>
-    <div id="starting-ctx-entries" class="space-y-2.5"></div>
-    <div id="starting-ctx-warnings" class="mt-3 space-y-1.5"></div>
-  </div>
-</div>
+  <!-- Left column: all insight panels -->
+  <div id="layout-left">
 
-<!-- Memory Health -->
-<div class="px-4 pb-6" id="memory-health-section" style="display:none">
-  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
-    <div class="flex items-center justify-between mb-1">
-      <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest">Memory health</h3>
-      <span class="text-[10px] text-zinc-400 cw-muted" id="mem-summary"></span>
+    <!-- By type + Token growth -->
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 mb-3">
+      <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+        <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">By type</h3>
+        <div id="type-breakdown" class="space-y-2.5"></div>
+      </div>
+      <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+        <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Token growth</h3>
+        <canvas id="sparkline" height="60" class="w-full rounded bg-zinc-50 block"></canvas>
+        <p class="text-[10px] text-zinc-300 cw-submuted mt-1">Orange dashes = 150k compaction threshold</p>
+      </div>
     </div>
-    <p class="text-[10px] text-zinc-300 cw-submuted mb-3">All files in <code>~/.claude/projects/.../memory/</code> sorted by token cost</p>
-    <div id="mem-index-warning" class="mb-3 hidden"></div>
-    <div id="mem-file-list" class="space-y-1.5 max-h-64 overflow-y-auto"></div>
-  </div>
-</div>
 
-<!-- Session Waste -->
-<div class="px-4 pb-6" id="waste-section" style="display:none">
-  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
-    <div class="flex items-center justify-between mb-1">
-      <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest">Session waste</h3>
-      <span class="text-[10px] text-zinc-400 cw-muted" id="waste-summary"></span>
+    <!-- Starting Context Breakdown -->
+    <div id="starting-ctx-section" class="mb-3" style="display:none">
+      <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+        <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-1">Starting context breakdown</h3>
+        <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Tokens consumed before the first user message</p>
+        <div id="starting-ctx-entries" class="space-y-2.5"></div>
+        <div id="starting-ctx-warnings" class="mt-3 space-y-1.5"></div>
+      </div>
     </div>
-    <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Duplicate reads, oversized results, and refactoring candidates</p>
-    <div id="waste-items" class="space-y-2"></div>
-    <p id="waste-empty" class="text-xs text-zinc-400 cw-muted text-center py-4" style="display:none">No obvious waste detected in this session</p>
-  </div>
-</div>
 
-<!-- Context blocks (scrollable) -->
-<div class="px-4 pb-6">
-  <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
-    <p class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Context blocks</p>
-    <div id="stacked-blocks" class="space-y-1 max-h-96 overflow-y-auto pr-1" style="scrollbar-width:thin"></div>
-  </div>
-</div>
+    <!-- Memory Health -->
+    <div id="memory-health-section" class="mb-3" style="display:none">
+      <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest">Memory health</h3>
+          <span class="text-[10px] text-zinc-400 cw-muted" id="mem-summary"></span>
+        </div>
+        <p class="text-[10px] text-zinc-300 cw-submuted mb-3">All files in <code>~/.claude/.../memory/</code> sorted by token cost</p>
+        <div id="mem-index-warning" class="mb-3 hidden"></div>
+        <div id="mem-file-list" class="space-y-1.5 max-h-48 overflow-y-auto"></div>
+      </div>
+    </div>
+
+    <!-- Session Waste -->
+    <div id="waste-section" class="mb-3" style="display:none">
+      <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest">Session waste</h3>
+          <span class="text-[10px] text-zinc-400 cw-muted" id="waste-summary"></span>
+        </div>
+        <p class="text-[10px] text-zinc-300 cw-submuted mb-3">Duplicate reads, oversized results, refactoring candidates</p>
+        <div id="waste-items" class="space-y-2"></div>
+        <p id="waste-empty" class="text-xs text-zinc-400 cw-muted text-center py-4" style="display:none">No obvious waste detected</p>
+      </div>
+    </div>
+
+  </div><!-- /layout-left -->
+
+  <!-- Right column: context blocks -->
+  <div id="layout-right">
+    <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4 h-full flex flex-col">
+      <p class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest mb-3 flex-shrink-0">Context blocks</p>
+      <div id="stacked-blocks" class="space-y-1 overflow-y-auto flex-1 pr-1" style="scrollbar-width:thin"></div>
+    </div>
+  </div><!-- /layout-right -->
+
+</div><!-- /layout-grid -->
 
 <!-- Hidden elements kept for JS compat -->
 <div id="context-map" style="display:none"></div>
