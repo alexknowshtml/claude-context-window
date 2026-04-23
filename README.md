@@ -4,7 +4,9 @@ A real-time context window visualizer for active [Claude Code](https://claude.ai
 
 Watches your Claude Code JSONL transcripts as they update and renders a live web dashboard showing token usage, cost estimates, cache hit rate, and a turn-by-turn breakdown — so you always know how much context you have left.
 
-![Screenshot of the context window visualizer](screenshot.png)
+![Desktop view of the context window visualizer](screenshot.png)
+
+![Mobile view of the context window visualizer](screenshot-mobile.png)
 
 ## Features
 
