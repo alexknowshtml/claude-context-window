@@ -666,7 +666,7 @@ const HTML = `<!DOCTYPE html>
   html.dark .cw-progress-fill { background-color: #e4e4e7 !important; }
   html.dark .cw-stat-pct { color: #e4e4e7 !important; }
   html.dark #session-select { background-color: #27272a !important; color: #e4e4e7 !important; border-color: #3f3f46 !important; }
-  html.dark #model-name { background-color: #3f3f46 !important; color: #a1a1aa !important; }
+  html.dark #model-name { color: #a1a1aa !important; }
   html.dark #thinking-badge { border-color: #3f3f46 !important; color: #a1a1aa !important; }
   html.dark #dark-toggle { color: #a1a1aa !important; }
   html.dark #dark-toggle:hover { color: #e4e4e7 !important; }
@@ -723,19 +723,18 @@ const HTML = `<!DOCTYPE html>
 <body class="bg-zinc-50 text-zinc-900 min-h-screen">
 
 <!-- Header -->
-<header class="bg-white cw-panel cw-border-b border-b border-zinc-200 h-12 px-4 flex items-center gap-3">
-  <div class="flex items-center gap-2">
+<header class="bg-white cw-panel cw-border-b border-b border-zinc-200 h-12 px-4 flex items-center gap-3 min-w-0">
+  <div class="flex items-center gap-2 shrink-0">
     <span class="live-dot w-1.5 h-1.5 rounded-full bg-emerald-500 block shrink-0" id="map-loading"></span>
     <span class="font-semibold text-sm tracking-tight">Context Window</span>
   </div>
-  <span class="text-xs text-zinc-400 bg-zinc-100 rounded-md px-2 py-0.5 font-mono" id="model-name">—</span>
   <span class="hidden text-xs text-zinc-400" id="turn-count"></span>
   <span class="hidden" id="model-limit"></span>
-  <div class="ml-auto flex items-center gap-2">
-    <button id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" class="text-zinc-400 hover:text-zinc-700 w-7 h-7 flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors text-base leading-none">
+  <div class="ml-auto flex items-center gap-2 min-w-0">
+    <button id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" class="text-zinc-400 hover:text-zinc-700 w-7 h-7 flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors text-base leading-none shrink-0">
       <span id="dark-icon">☀️</span>
     </button>
-    <select id="session-select" onchange="selectSession(this.value)" class="text-xs text-zinc-600 bg-white border border-zinc-200 rounded-md px-2.5 py-1.5 outline-none font-sans">
+    <select id="session-select" onchange="selectSession(this.value)" style="max-width:160px;min-width:0" class="text-xs text-zinc-600 bg-white border border-zinc-200 rounded-md px-2.5 py-1.5 outline-none font-sans truncate">
       <option value="">Loading…</option>
     </select>
   </div>
@@ -751,7 +750,7 @@ const HTML = `<!DOCTYPE html>
         <span class="text-lg text-zinc-400 cw-muted font-medium tabular-nums">200,000</span>
         <span class="text-[10px] font-semibold text-zinc-400 cw-muted uppercase tracking-widest ml-0.5">tok</span>
       </div>
-      <p class="text-[11px] text-zinc-400 cw-muted mt-0.5"><span id="stat-remaining">—</span> remaining</p>
+      <p class="text-[11px] text-zinc-400 cw-muted mt-0.5"><span id="stat-remaining">—</span> remaining · <span class="font-mono" id="model-name">—</span></p>
     </div>
     <span class="text-2xl font-bold text-zinc-800 cw-stat-pct tabular-nums" id="stat-pct">—%</span>
   </div>
