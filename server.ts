@@ -277,16 +277,41 @@ async function readStartingContextFiles(): Promise<StartingContextEntry[]> {
   return results;
 }
 
+async function extractFirstUserMessage(filePath: string): Promise<string> {
+  try {
+    const raw = await readFile(filePath, "utf-8");
+    const lines = raw.trim().split("\n").slice(0, 30); // only scan first 30 lines
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type !== "user") continue;
+        const content = obj.message?.content;
+        if (typeof content === "string") {
+          // Extract the actual user message (not ANDY-INTERNAL-TASK wrapper)
+          const msgMatch = content.match(/\*\*Message:\*\*\s*(.+)/);
+          if (msgMatch) return msgMatch[1].trim().slice(0, 60);
+          if (!content.includes("[ANDY-INTERNAL-TASK]") && content.trim().length > 0) {
+            return content.trim().slice(0, 60);
+          }
+        }
+      } catch { /* skip bad lines */ }
+    }
+  } catch { /* file unreadable */ }
+  return "";
+}
+
 async function findActiveSessions(): Promise<
-  Array<{ id: string; mtime: number }>
+  Array<{ id: string; mtime: number; label: string }>
 > {
   try {
     const files = await readdir(PROJECTS_DIR);
     const jsonls = files.filter((f) => f.endsWith(".jsonl"));
     const stats = await Promise.all(
       jsonls.map(async (f) => {
-        const s = await stat(join(PROJECTS_DIR, f));
-        return { id: f.replace(".jsonl", ""), mtime: s.mtime.getTime() };
+        const fpath = join(PROJECTS_DIR, f);
+        const s = await stat(fpath);
+        const label = await extractFirstUserMessage(fpath);
+        return { id: f.replace(".jsonl", ""), mtime: s.mtime.getTime(), label };
       })
     );
     return stats.sort((a, b) => b.mtime - a.mtime).slice(0, 20);
@@ -900,9 +925,18 @@ function connect(sessionId) {
 
 function populateSessions(sessions, active) {
   const sel = document.getElementById('session-select');
-  sel.innerHTML = sessions.map(s =>
-    \`<option value="\${s.id}" \${s.id === active ? 'selected' : ''}>\${s.id.slice(0,8)}… (\${new Date(s.mtime).toLocaleTimeString()})</option>\`
-  ).join('');
+  sel.innerHTML = sessions.map((s, i) => {
+    const time = new Date(s.mtime);
+    const now = new Date();
+    const isToday = time.toDateString() === now.toDateString();
+    const timeStr = isToday
+      ? time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : time.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const displayLabel = s.label
+      ? (s.label.length > 40 ? s.label.slice(0, 40) + '…' : s.label)
+      : (i === 0 ? 'Active session' : \`Session \${i + 1}\`);
+    return \`<option value="\${s.id}" \${s.id === active ? 'selected' : ''}>\${escHtml(displayLabel)} (\${timeStr})</option>\`;
+  }).join('');
   if (!currentSessionId && active) {
     currentSessionId = active;
   }
@@ -1289,7 +1323,7 @@ async function broadcastToClient(
   client.ws.send(
     JSON.stringify({
       type: "sessions",
-      sessions: sessions.map((s) => ({ id: s.id, mtime: s.mtime })),
+      sessions: sessions.map((s) => ({ id: s.id, mtime: s.mtime, label: s.label })),
       active: client.sessionId ?? sessions[0]?.id ?? null,
     })
   );
