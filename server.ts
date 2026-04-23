@@ -814,7 +814,7 @@ const HTML = `<!DOCTYPE html>
       <div class="bg-white cw-panel border border-zinc-200 rounded-lg p-4">
         <h3 class="text-[10px] font-bold text-zinc-400 cw-muted uppercase tracking-widest mb-3">Token growth</h3>
         <canvas id="sparkline" height="60" class="w-full rounded bg-zinc-50 block"></canvas>
-        <p class="text-[10px] text-zinc-300 cw-submuted mt-1">Orange dashes = 150k compaction threshold</p>
+        <p class="text-[10px] text-zinc-300 cw-submuted mt-1">Orange dashes = 150k compaction · Gray line = 200k limit</p>
       </div>
     </div>
 
@@ -1002,51 +1002,72 @@ function renderSparkline(turns) {
   const canvas = document.getElementById('sparkline');
   if (!canvas || !turns.length) return;
   const ctx = canvas.getContext('2d');
-  const W = canvas.offsetWidth || 300;
+  const LABEL_W = 32; // left margin for y-axis labels
+  const W = (canvas.offsetWidth || 300);
   canvas.width = W;
-  const H = 60;
+  const H = 72;
+  canvas.height = H;
   ctx.clearRect(0, 0, W, H);
 
   const dk = document.documentElement.classList.contains('dark');
   const lineColor = dk ? '#a1a1aa' : '#3f3f46';
   const fillColor = dk ? 'rgba(161,161,170,0.08)' : 'rgba(63,63,70,0.06)';
+  const mutedColor = dk ? '#52525b' : '#d4d4d8';
+  const labelColor = dk ? '#71717a' : '#a1a1aa';
 
+  const LIMIT = 200000;
   // Use max cumulative tokens seen up to each turn (monotonically increasing)
   let running = 0;
   const values = turns.map(t => { running = Math.max(running, t.inputTokens); return running; });
-  const max = Math.max(...values, 1);
-  const step = W / Math.max(values.length - 1, 1);
+  // Scale to limit so 200k = top of chart
+  const scale = (v) => H - 4 - (v / LIMIT) * (H - 10);
+  const plotW = W - LABEL_W;
+  const step = plotW / Math.max(values.length - 1, 1);
+
+  // Y-axis labels: 0, 100k, 200k
+  ctx.font = '9px system-ui, sans-serif';
+  ctx.fillStyle = labelColor;
+  ctx.textAlign = 'right';
+  ctx.fillText('200k', LABEL_W - 3, scale(200000) + 3);
+  ctx.fillText('100k', LABEL_W - 3, scale(100000) + 3);
+  ctx.fillText('0',    LABEL_W - 3, scale(0) - 1);
+
+  // 200k ceiling line (solid gray)
+  ctx.beginPath();
+  ctx.strokeStyle = mutedColor;
+  ctx.lineWidth = 1;
+  ctx.moveTo(LABEL_W, scale(LIMIT));
+  ctx.lineTo(W, scale(LIMIT));
+  ctx.stroke();
 
   // Fill area
   ctx.beginPath();
-  ctx.moveTo(0, H);
+  ctx.moveTo(LABEL_W, scale(0));
   values.forEach((v, i) => {
-    const x = i * step;
-    const y = H - (v / max) * (H - 6) - 2;
-    if (i === 0) ctx.lineTo(x, y); else ctx.lineTo(x, y);
+    ctx.lineTo(LABEL_W + i * step, scale(v));
   });
-  ctx.lineTo((values.length - 1) * step, H);
+  ctx.lineTo(LABEL_W + (values.length - 1) * step, scale(0));
   ctx.closePath();
   ctx.fillStyle = fillColor;
   ctx.fill();
 
-  // Line
+  // Token line
   ctx.beginPath();
   values.forEach((v, i) => {
-    const x = i * step;
-    const y = H - (v / max) * (H - 6) - 2;
+    const x = LABEL_W + i * step;
+    const y = scale(v);
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.strokeStyle = lineColor;
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // Compaction threshold line at 150k
-  const threshY = H - (150000 / max) * (H - 6) - 2;
+  // 150k compaction threshold (orange dashes)
+  const threshY = scale(150000);
   if (threshY > 0 && threshY < H) {
     ctx.beginPath();
     ctx.setLineDash([3, 3]);
-    ctx.moveTo(0, threshY);
+    ctx.moveTo(LABEL_W, threshY);
     ctx.lineTo(W, threshY);
     ctx.strokeStyle = '#f97316';
     ctx.lineWidth = 1;
