@@ -1112,11 +1112,14 @@ function renderStackedBlocks(blocks) {
     div.style.cssText = \`display:flex;align-items:center;gap:12px;border-left:3px solid \${color};background:\${bgColor};border-radius:0 6px 6px 0;padding:0 12px;height:\${h}px;border:1px solid \${bColor};border-left-width:3px;border-left-color:\${color};cursor:default;transition:background 0.1s\`;
     div.onmouseenter = () => div.style.background = bgHover;
     div.onmouseleave = () => div.style.background = bgColor;
+    const bCost = blockCost(b.type, b.tokens);
+    const costStr = fmtCost(bCost);
     if (h >= 28) {
       div.innerHTML = \`
         <span style="font-size:10px;font-weight:700;color:\${color};text-transform:uppercase;letter-spacing:0.06em;width:64px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(label)}</span>
         <span style="font-size:13px;color:\${textColor};flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${escHtml(b.label)}</span>
-        <span style="font-size:11px;color:\${mutedColor};font-variant-numeric:tabular-nums;flex-shrink:0">\${b.tokens.toLocaleString()}</span>\`;
+        <span style="font-size:10px;color:\${mutedColor};font-variant-numeric:tabular-nums;flex-shrink:0;opacity:0.7">\${costStr}</span>
+        <span style="font-size:11px;color:\${mutedColor};font-variant-numeric:tabular-nums;flex-shrink:0;width:40px;text-align:right">\${b.tokens.toLocaleString()}</span>\`;
     } else {
       div.innerHTML = \`
         <span style="font-size:10px;font-weight:700;color:\${color};text-transform:uppercase;letter-spacing:0.06em;width:64px;flex-shrink:0">\${escHtml(label)}</span>
@@ -1125,6 +1128,10 @@ function renderStackedBlocks(blocks) {
     container.appendChild(div);
   }
 }
+
+const BLOCK_RATE = { system: 0.30, skill_prompt: 0.30, memory: 0.30, user: 3.0, assistant: 15.0, tool_result: 3.0 };
+function blockCost(type, tokens) { return (tokens / 1e6) * (BLOCK_RATE[type] || 3.0); }
+function fmtCost(usd) { return usd < 0.0001 ? '<$0.0001' : '$' + usd.toFixed(4); }
 
 function renderTypeBreakdown(byType, total) {
   const el = document.getElementById('type-breakdown');
@@ -1139,6 +1146,8 @@ function renderTypeBreakdown(byType, total) {
       const barBg = dk ? '#3f3f46' : '#f4f4f5';
       const barFill = dk ? '#e4e4e7' : '#3f3f46';
       const countColor = dk ? '#a1a1aa' : '#52525b';
+      const costColor = dk ? '#52525b' : '#a1a1aa';
+      const cost = blockCost(type, tokens);
       return \`<div style="display:flex;align-items:center;gap:10px">
         <span style="width:6px;height:6px;border-radius:50%;background:\${color};flex-shrink:0;display:block"></span>
         <span style="font-size:11px;color:\${labelColor};width:64px;flex-shrink:0">\${TYPE_LABELS[type] || type}</span>
@@ -1146,6 +1155,7 @@ function renderTypeBreakdown(byType, total) {
           <div style="height:100%;background:\${barFill};border-radius:99px;width:\${pct}%"></div>
         </div>
         <span style="font-size:11px;font-weight:500;color:\${countColor};width:40px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmt(tokens)}</span>
+        <span style="font-size:10px;color:\${costColor};width:52px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0">\${fmtCost(cost)}</span>
       </div>\`;
     }).join('');
 }
