@@ -1011,7 +1011,9 @@ function renderSparkline(turns) {
   const lineColor = dk ? '#a1a1aa' : '#3f3f46';
   const fillColor = dk ? 'rgba(161,161,170,0.08)' : 'rgba(63,63,70,0.06)';
 
-  const values = turns.map(t => t.inputTokens);
+  // Use max cumulative tokens seen up to each turn (monotonically increasing)
+  let running = 0;
+  const values = turns.map(t => { running = Math.max(running, t.inputTokens); return running; });
   const max = Math.max(...values, 1);
   const step = W / Math.max(values.length - 1, 1);
 
